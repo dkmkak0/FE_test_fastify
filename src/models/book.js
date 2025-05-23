@@ -1,8 +1,16 @@
 export default {
-  getAll: async (db) => {
-    const result = await db.query('SELECT * FROM books');
-    return result.rows;
-  },
+  async getAll(db) {
+  const query = `
+    SELECT 
+      id, title, author, year, description, image_url,
+      TO_CHAR(created_at, 'YYYY-MM-DD HH24:MI:SS') as created_at,
+      TO_CHAR(updated_at, 'YYYY-MM-DD HH24:MI:SS') as updated_at
+    FROM books 
+    ORDER BY created_at DESC
+  `;
+  const result = await db.query(query);
+  return result.rows;
+},
 
   getById: async (db, id) => {
     const result = await db.query('SELECT * FROM books WHERE id = $1', [id]);
