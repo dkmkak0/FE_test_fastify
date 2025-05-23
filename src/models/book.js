@@ -1,44 +1,34 @@
 export default {
-  getAll: (db) => db.data.books,
-  
-  getById: (db, id) => db.data.books.find(b => b.id === id),
-  
+  getAll: async (db) => {
+    const result = await db.query('SELECT * FROM books');
+    return result.rows;
+  },
+
+  getById: async (db, id) => {
+    const result = await db.query('SELECT * FROM books WHERE id = $1', [id]);
+    return result.rows[0] || null;
+  },
+
   create: async (db, book) => {
-    const newBook = { 
-      id: Date.now().toString(), 
-      ...book,
-      createdAt: new Date().toISOString()
-    }
-    
-    db.data.books.push(newBook)
-    await db.write()
-    return newBook
+    const { title, author, year, description, image_url } = book;
+    const result = await db.query(
+      'INSERT INTO books (title, author, year, description, image_url, created_at) VALUES ($1, $2, $3, $4, $5, NOW()) RETURNING *',
+      [title, author, year, description, image_url]
+    );
+    return result.rows[0];
   },
-  
+
   update: async (db, id, updates) => {
-    const index = db.data.books.findIndex(b => b.id === id)
-    if (index === -1) return null
-    
-    const updatedBook = { 
-      ...db.data.books[index], 
-      ...updates,
-      updatedAt: new Date().toISOString()
-    }
-    
-    db.data.books[index] = updatedBook
-    await db.write()
-    return updatedBook
+    const { title, author, year, description, image_url } = updates;
+    const result = await db.query(
+      'UPDATE books SET title = $1, author = $2, year = $3, description = $4, image_url = $5, updated_at = NOW() WHERE id = $6 RETURNING *',
+      [title, author, year, description, image_url, id]
+    );
+    return result.rows[0] || null;
   },
-  
+
   delete: async (db, id) => {
-    const initialLength = db.data.books.length
-    db.data.books = db.data.books.filter(b => b.id !== id)
-    
-    if (db.data.books.length === initialLength) {
-      return false
-    }
-    
-    await db.write()
-    return true
-  }
-}
+    const result = await db.query('DELETE FROM books WHERE id = $1 RETURNING *', [id]);
+    return result.rowCount > 0;
+  },
+};

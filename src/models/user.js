@@ -1,31 +1,32 @@
-import bcrypt from 'bcrypt'
+import bcrypt from 'bcrypt';
 
 export default {
-  findByUsername: (db, username) => {
-    return db.data.users.find(u => u.username === username)
+  findByUsername: async (db, username) => {
+    const result = await db.query('SELECT * FROM users WHERE username = $1', [username]);
+    return result.rows[0] || null;
   },
-  
+
   create: async (db, userData) => {
-    // Mã hóa password
-    const salt = await bcrypt.genSalt(10)
-    const hashedPassword = await bcrypt.hash(userData.password, salt)
-    
+    const { username, password } = userData;
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
+
     const newUser = {
       id: Date.now().toString(),
-      username: userData.username,
+      username,
       password: hashedPassword,
-      createdAt: new Date().toISOString()
-    }
-    
-    db.data.users.push(newUser)
-    await db.write()
-    
-    // Trả về user nhưng không bao gồm password
-    const { password, ...userWithoutPassword } = newUser
-    return userWithoutPassword
+      createdAt: new Date().toISOString(),
+    };
+
+    const result = await db.query(
+      'INSERT INTO users (id, username, password, created_at) VALUES ($1, $2, $3, NOW()) RETURNING id, username, created_at',
+      [newUser.id, newUser.username, newUser.password]
+    );
+
+    return result.rows[0];
   },
-  
+
   validatePassword: async (user, password) => {
-    return await bcrypt.compare(password, user.password)
-  }
-}
+    return await bcrypt.compare(password, user.password);
+  },
+};
