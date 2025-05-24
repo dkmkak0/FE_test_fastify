@@ -15,8 +15,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: true # Tải submodules nếu có
-          fetch-depth: 1 # Chỉ lấy commit mới nhất để giảm thời gian
+          submodules: true
+          fetch-depth: 1
 
       - name: Cache submodules
         uses: actions/cache@v4
@@ -30,20 +30,13 @@ jobs:
         run: git submodule update --init --depth 1
 
       - name: Set up Node.js version
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: '22.x'
-
-      - name: Cache node modules
-        uses: actions/cache@v4
-        with:
-          path: ~/.npm
-          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-node-
+          cache: 'npm' # Tự động cache npm dependencies
 
       - name: npm install
-        run: npm install
+        run: npm ci # Dùng npm ci thay vì npm install để nhanh hơn
 
       - name: Remove node_modules before deployment
         run: rm -rf node_modules
@@ -52,7 +45,12 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: node-app
-          path: .
+          path: |
+            src/
+            package.json
+            package-lock.json
+            .env
+            !node_modules/
 
   deploy:
     runs-on: ubuntu-latest
