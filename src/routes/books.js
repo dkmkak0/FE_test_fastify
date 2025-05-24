@@ -1,3 +1,4 @@
+//routes/book.js
 import axios from 'axios';
 import FormData from 'form-data';
 
@@ -28,6 +29,11 @@ export default async (fastify) => {
     },
   }, async (request, reply) => {
     try {
+      const cacheKey = 'books:all';
+      const cachedBooks = await fastify.cache.get(cacheKey);
+      if (cachedBooks) {
+        return cachedBooks;
+      }
       const books = await fastify.bookModel.getAll(fastify.db);
       return books;
     } catch (error) {
@@ -71,10 +77,16 @@ export default async (fastify) => {
   }, async (request, reply) => {
     try {
       const { id } = request.params;
+      const cacheKey = `book:${id}`;
+    const cachedBook = await fastify.cache.get(cacheKey);
+    if (cachedBook) {
+      return cachedBook;
+    }
       const book = await fastify.bookModel.getById(fastify.db, id);
       if (!book) {
         return reply.code(404).send({ error: 'Không tìm thấy sách' });
       }
+      await fastify.cache.set(cacheKey, book);
       return book;
     } catch (error) {
       fastify.log.error(error);
@@ -137,6 +149,8 @@ export default async (fastify) => {
 
     // Lưu sách vào database
     const book = await fastify.bookModel.create(fastify.db, bookData);
+    await fastify.cache.del('books:all'); // Xóa cache danh sách sách
+    await fastify.cache.set(`book:${book.id}`, book); // Cache sách mới
     reply.code(201).send(book);
   } catch (error) {
     reply.code(500).send({ error: `Lỗi khi tạo sách mới: ${error.message}` });
@@ -200,6 +214,9 @@ export default async (fastify) => {
 
     // Cập nhật sách trong database
     const updatedBook = await fastify.bookModel.update(fastify.db, id, updates);
+    await fastify.cache.del('books:all'); // Xóa cache danh sách sách
+    await fastify.cache.del(`book:${id}`); // Xóa cache sách cũ
+    await fastify.cache.set(`book:${id}`, updatedBook); // Cache sách mới
     reply.send(updatedBook);
   } catch (error) {
     reply.code(500).send({ error: `Lỗi khi cập nhật sách: ${error.message}` });
@@ -245,6 +262,8 @@ export default async (fastify) => {
       if (!success) {
         return reply.code(404).send({ error: 'Không tìm thấy sách' });
       }
+      await fastify.cache.del('books:all'); // Xóa cache danh sách sách
+    await fastify.cache.del(`book:${id}`); // Xóa cache sách đã xóa
       return { message: 'Xóa sách thành công' };
     } catch (error) {
       fastify.log.error(error);

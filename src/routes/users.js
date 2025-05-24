@@ -1,3 +1,4 @@
+//routes/users.js
 export default async (fastify) => {
   // Đăng ký người dùng mới
   fastify.post('/register', {

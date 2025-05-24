@@ -1,3 +1,4 @@
+//plugins/database.js
 import { Pool } from "pg";
 import fastifyPlugin from "fastify-plugin";
 

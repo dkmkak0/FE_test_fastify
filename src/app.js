@@ -1,3 +1,4 @@
+//app.js
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import fastifyMultipart from '@fastify/multipart';
@@ -8,7 +9,7 @@ import userModel from './models/user.js';
 import bookRoutes from './routes/books.js';
 import userRoutes from './routes/users.js';
 import 'dotenv/config';
-
+import AutoLoad from '@fastify/autoload';
 const fastify = Fastify({ 
   logger: true,
   ajv: {
@@ -18,6 +19,12 @@ const fastify = Fastify({
       useDefaults: true,
     },
   },
+});
+await fastify.register(AutoLoad, {
+  dir: join(__dirname, 'src', 'plugins'),
+  options: {
+    ttl: 30000 // 5 phút cache TTL
+  }
 });
 
 // Đăng ký plugins

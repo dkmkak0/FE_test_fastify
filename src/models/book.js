@@ -1,3 +1,4 @@
+//models/book.js
 export default {
   async getAll(db) {
   const query = `

@@ -1,3 +1,4 @@
+//models/user.js
 import bcrypt from 'bcrypt';
 
 export default {
