@@ -2,9 +2,14 @@ import axios from 'axios';
 import FormData from 'form-data';
 
 export default async (fastify) => {
-  // Lấy tất cả sách (không cần xác thực)
   fastify.get('/books', {
     schema: {
+      querystring: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', minLength: 1 },
+        },
+      },
       response: {
         200: {
           type: 'array',
@@ -26,22 +31,33 @@ export default async (fastify) => {
     },
   }, async (request, reply) => {
     try {
-      const cacheKey = 'books:all';
+      const { title } = request.query;
+      fastify.log.info(`Searching books with title: ${title}`);
+      
+      const cacheKey = title && title.trim() !== '' ? `books:title:${title.toLowerCase()}` : 'books:all';
+      
+      // Kiểm tra cache
       const cachedBooks = await fastify.cache.get(cacheKey);
       if (cachedBooks) {
+        fastify.log.info(`Returning cached books for key: ${cacheKey}`);
         return cachedBooks;
       }
 
-      const books = await fastify.bookModel.getAll(fastify.db);
-      await fastify.cache.set(cacheKey, books); // Lưu vào cache
+      // Đo thời gian truy vấn
+      const startTime = Date.now();
+      const books = await fastify.bookModel.getAll(fastify.db, title);
+      const duration = Date.now() - startTime;
+      fastify.log.info(`Books retrieved: ${books.length}, Query time: ${duration}ms`);
+
+      // Lưu vào cache
+      await fastify.cache.set(cacheKey, books);
       return books;
     } catch (error) {
       fastify.log.error(error);
-      reply.code(500).send({ error: 'Lỗi khi lấy danh sách sách' });
+      return reply.code(500).send({ error: 'Lỗi khi lấy danh sách sách', details: error.message });
     }
   });
 
-  // Lấy sách theo ID (không cần xác thực)
   fastify.get('/books/:id', {
     schema: {
       params: {
@@ -91,11 +107,10 @@ export default async (fastify) => {
       return book;
     } catch (error) {
       fastify.log.error(error);
-      reply.code(500).send({ error: 'Lỗi khi lấy thông tin sách' });
+      return reply.code(500).send({ error: 'Lỗi khi lấy thông tin sách', details: error.message });
     }
   });
 
-  // Thêm sách mới (yêu cầu xác thực)
   fastify.post('/books', {
     preHandler: fastify.authenticate,
   }, async (request, reply) => {
@@ -108,11 +123,25 @@ export default async (fastify) => {
       for await (const part of parts) {
         if (part.file) {
           const buffer = await part.toBuffer();
+          if (buffer.length === 0) {
+            return reply.code(400).send({
+              error: 'Validation failed',
+              details: 'File ảnh không hợp lệ: File rỗng'
+            });
+          }
           file = {
             buffer: buffer,
             filename: part.filename,
             mimetype: part.mimetype
           };
+          // Kiểm tra định dạng file
+          const allowedFormats = ['image/jpeg', 'image/png', 'image/gif'];
+          if (!allowedFormats.includes(file.mimetype)) {
+            return reply.code(400).send({
+              error: 'Validation failed',
+              details: 'Định dạng file không được hỗ trợ. Chỉ hỗ trợ JPG, PNG, GIF.'
+            });
+          }
         } else {
           fields[part.fieldname] = part.value;
         }
@@ -120,7 +149,10 @@ export default async (fastify) => {
 
       // Kiểm tra các trường bắt buộc
       if (!fields.title || !fields.author) {
-        return reply.code(400).send({ error: 'Thiếu các trường bắt buộc: title, author' });
+        return reply.code(400).send({ 
+          error: 'Validation failed',
+          details: 'Thiếu các trường bắt buộc: title và author phải được cung cấp'
+        });
       }
 
       // Tạo object dữ liệu sách
@@ -134,31 +166,58 @@ export default async (fastify) => {
 
       // Nếu có file ảnh, upload lên ImgBB
       if (file) {
+        // Kiểm tra API key
+        if (!process.env.IMGBB_API_KEY) {
+          return reply.code(400).send({ 
+            error: 'Server configuration error',
+            details: 'ImgBB API key không được thiết lập. Vui lòng kiểm tra cấu hình server.'
+          });
+        }
+
         const formData = new FormData();
         formData.append('image', file.buffer, file.filename);
         formData.append('key', process.env.IMGBB_API_KEY);
 
-        const response = await axios.post('https://api.imgbb.com/1/upload', formData, {
-          headers: formData.getHeaders(),
-          timeout: 10000
-        });
+        try {
+          const response = await axios.post('https://api.imgbb.com/1/upload', formData, {
+            headers: formData.getHeaders(),
+            timeout: 10000
+          });
 
-        if (response.data?.data?.url) {
-          bookData.image_url = response.data.data.url;
+          if (response.data?.data?.url) {
+            bookData.image_url = response.data.data.url;
+          } else {
+            return reply.code(400).send({ 
+              error: 'Image upload failed',
+              details: 'Không thể lấy URL ảnh từ ImgBB. Vui lòng thử lại.'
+            });
+          }
+        } catch (error) {
+          if (error.response && error.response.status === 400) {
+            return reply.code(400).send({ 
+              error: 'Image upload failed',
+              details: 'Yêu cầu upload ảnh không hợp lệ. Có thể do API key không đúng hoặc file ảnh không được hỗ trợ (chỉ hỗ trợ JPG, PNG, GIF).'
+            });
+          }
+          throw error; // Ném lỗi khác để xử lý ở catch bên ngoài
         }
       }
 
       // Lưu sách vào database
       const book = await fastify.bookModel.create(fastify.db, bookData);
-      await fastify.cache.del('books:all'); // Xóa cache danh sách sách
-      await fastify.cache.set(`book:${book.id}`, book); // Cache sách mới
-      reply.code(201).send(book);
+      await fastify.cache.del('books:all');
+      await fastify.cache.delByPrefix('books:title:');
+      await fastify.cache.set(`book:${book.id}`, book);
+      return reply.code(201).send(book);
     } catch (error) {
-      reply.code(500).send({ error: `Lỗi khi tạo sách mới: ${error.message}` });
+      fastify.log.error(error);
+      return reply.code(500).send({ 
+        error: 'Lỗi khi tạo sách mới',
+        details: error.message
+      });
     }
   });
 
-  // Cập nhật sách (yêu cầu xác thực)
   fastify.put('/books/:id', {
     preHandler: fastify.authenticate,
   }, async (request, reply) => {
@@ -168,63 +227,98 @@ export default async (fastify) => {
       const fields = {};
       let file;
 
-      // Parse dữ liệu từ multipart form
       for await (const part of parts) {
         if (part.file) {
           const buffer = await part.toBuffer();
+          if (buffer.length === 0) {
+            return reply.code(400).send({
+              error: 'Validation failed',
+              details: 'File ảnh không hợp lệ: File rỗng'
+            });
+          }
           file = {
             buffer: buffer,
             filename: part.filename,
             mimetype: part.mimetype
           };
+          // Kiểm tra định dạng file
+          const allowedFormats = ['image/jpeg', 'image/png', 'image/gif'];
+          if (!allowedFormats.includes(file.mimetype)) {
+            return reply.code(400).send({
+              error: 'Validation failed',
+              details: 'Định dạng file không được hỗ trợ. Chỉ hỗ trợ JPG, PNG, GIF.'
+            });
+          }
         } else {
           fields[part.fieldname] = part.value;
         }
       }
 
-      // Lấy thông tin sách hiện tại
       const currentBook = await fastify.bookModel.getById(fastify.db, id);
       if (!currentBook) {
         return reply.code(404).send({ error: 'Không tìm thấy sách' });
       }
 
-      // Tạo object cập nhật, giữ nguyên giá trị hiện tại nếu không có dữ liệu mới
       const updates = {
         title: fields.title || currentBook.title,
         author: fields.author || currentBook.author,
         year: fields.year ? parseInt(fields.year) : currentBook.year,
-        description: fields.description || currentBook.description,
-        image_url: currentBook.image_url // Giữ nguyên image_url nếu không có file mới
+        description: fields.description || null,
+        image_url: currentBook.image_url
       };
 
-      // Nếu có file ảnh mới, upload lên ImgBB
       if (file) {
+        if (!process.env.IMGBB_API_KEY) {
+          return reply.code(400).send({ 
+            error: 'Server configuration error',
+            details: 'ImgBB API key không được thiết lập. Vui lòng kiểm tra cấu hình server.'
+          });
+        }
+
         const formData = new FormData();
         formData.append('image', file.buffer, file.filename);
         formData.append('key', process.env.IMGBB_API_KEY);
 
-        const response = await axios.post('https://api.imgbb.com/1/upload', formData, {
-          headers: formData.getHeaders(),
-          timeout: 10000
-        });
+        try {
+          const response = await axios.post('https://api.imgbb.com/1/upload', formData, {
+            headers: formData.getHeaders(),
+            timeout: 10000
+          });
 
-        if (response.data?.data?.url) {
-          updates.image_url = response.data.data.url;
+          if (response.data?.data?.url) {
+            updates.image_url = response.data.data.url;
+          } else {
+            return reply.code(400).send({ 
+              error: 'Image upload failed',
+              details: 'Không thể lấy URL ảnh từ ImgBB. Vui lòng thử lại.'
+            });
+          }
+        } catch (error) {
+          if (error.response && error.response.status === 400) {
+            return reply.code(400).send({ 
+              error: 'Image upload failed',
+              details: 'Yêu cầu upload ảnh không hợp lệ. Có thể do API key không đúng hoặc file ảnh không được hỗ trợ (chỉ hỗ trợ JPG, PNG, GIF).'
+            });
+          }
+          throw error;
         }
       }
 
-      // Cập nhật sách trong database
       const updatedBook = await fastify.bookModel.update(fastify.db, id, updates);
-      await fastify.cache.del('books:all'); // Xóa cache danh sách sách
-      await fastify.cache.del(`book:${id}`); // Xóa cache sách cũ
-      await fastify.cache.set(`book:${id}`, updatedBook); // Cache sách mới
-      reply.send(updatedBook);
+      await fastify.cache.del('books:all');
+      await fastify.cache.delByPrefix('books:title:');
+      await fastify.cache.del(`book:${id}`);
+      await fastify.cache.set(`book:${id}`, updatedBook);
+      return updatedBook;
     } catch (error) {
-      reply.code(500).send({ error: `Lỗi khi cập nhật sách: ${error.message}` });
+      fastify.log.error(error);
+      return reply.code(500).send({ 
+        error: 'Lỗi khi cập nhật sách',
+        details: error.message
+      });
     }
   });
 
-  // Xóa sách (yêu cầu xác thực)
   fastify.delete('/books/:id', {
     preHandler: fastify.authenticate,
     schema: {
@@ -263,48 +357,53 @@ export default async (fastify) => {
       if (!success) {
         return reply.code(404).send({ error: 'Không tìm thấy sách' });
       }
-      await fastify.cache.del('books:all'); // Xóa cache danh sách sách
-      await fastify.cache.del(`book:${id}`); // Xóa cache sách đã xóa
+      await fastify.cache.del('books:all');
+      await fastify.cache.delByPrefix('books:title:');
+      await fastify.cache.del(`book:${id}`);
       return { message: 'Xóa sách thành công' };
     } catch (error) {
       fastify.log.error(error);
-      reply.code(500).send({ error: 'Lỗi khi xóa sách' });
+      return reply.code(500).send({ 
+        error: 'Lỗi khi xóa sách',
+        details: error.message
+      });
     }
   });
 
   fastify.get('/books/suggestions', {
     schema: {
-      querystring:{
+      querystring: {
         type: 'object',
         required: ['query'],
-        properties:{
-          query: {type: 'string', minLength: 1},
-          limit: {type: 'integer', minimum: 1, maximum: 20, default: 10}
+        properties: {
+          query: { type: 'string', minLength: 1 },
+          limit: { type: 'integer', minimum: 1, maximum: 20, default: 10 },
         },
       },
       response: {
         200: {
           type: 'array',
-          items: {type: 'string'},
+          items: { type: 'string' },
         },
       },
     },
   }, async (request, reply) => {
-    try{
-      const {query, limit = 10} = request.query;
-      const cacheKey = `suggestions:${query}:limit:${limit}`;
-      // const cachedSuggestions = await fastify.cache.get(cacheKey);
-      // if(cachedSuggestions){
-      //   return cachedSuggestions;
-      // }
-      // console.log(request.query);
+    try {
+      const { query, limit = 10 } = request.query;
+      fastify.log.info(`Searching suggestions for query: ${query}, limit: ${limit}`);
+
+      const startTime = Date.now();
       const suggestions = await fastify.bookModel.getSuggestions(fastify.db, query, limit);
-      await fastify.cache.set(cacheKey, suggestions);
+      const duration = Date.now() - startTime;
+      fastify.log.info(`Suggestions: ${suggestions}, Search time: ${duration}ms`);
+
       return suggestions;
-    }catch(error){
+    } catch (error) {
       fastify.log.error(error);
-      reply.code(500).send({error: 'lỗi khi láy gợi ý tìm kiếm'});
+      return reply.code(500).send({ 
+        error: 'Lỗi khi lấy gợi ý tìm kiếm',
+        details: error.message
+      });
     }
-  }
-)
+  });
 };

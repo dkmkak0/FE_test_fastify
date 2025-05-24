@@ -3,7 +3,7 @@ import fp from 'fastify-plugin';
 export default fp(async (fastify, options) => {
   // Tạo một Map để lưu trữ cache
   const cache = new Map();
-  const ttl = options.expiresIn || 300; // TTL mặc định 5 phút (300 giây)
+  const ttl = options.expiresIn || 20; // TTL mặc định 20 giây
 
   // Decorators cho fastify để sử dụng cache
   fastify.decorate('cache', {
@@ -25,6 +25,13 @@ export default fp(async (fastify, options) => {
     },
     del: async (key) => {
       cache.delete(key);
+    },
+    delByPrefix: async (prefix) => {
+      for (const key of cache.keys()) {
+        if (key.startsWith(prefix)) {
+          cache.delete(key);
+        }
+      }
     }
   });
 

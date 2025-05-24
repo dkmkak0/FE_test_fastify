@@ -42,6 +42,12 @@ fastify.register(fastifyMultipart, {
 fastify.decorate('bookModel', bookModel);
 fastify.decorate('userModel', userModel);
 
+//nạp dữ liệu gợi ý vào bộ nhớ
+fastify.after(async () => {
+  await fastify.bookModel.init(fastify.db);
+  fastify.log.info('đã load xong dữ liệu gợi ý');
+})
+
 // Đăng ký routes
 fastify.register(bookRoutes, { prefix: '/api' });
 fastify.register(userRoutes, { prefix: '/api' });
