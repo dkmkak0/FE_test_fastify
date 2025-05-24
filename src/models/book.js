@@ -40,4 +40,13 @@ export default {
     const result = await db.query('DELETE FROM books WHERE id = $1 RETURNING *', [id]);
     return result.rowCount > 0;
   },
+
+  async getSuggestions(db, query, limit = 10){
+    const searchQuery = `%${query}%`;
+    const result = await db.query(
+      'Select title From books where title ILIKE $1 limit $2',
+      [searchQuery, limit]
+    );
+    return result?.rows?.map(row => row.title) || [];
+  }
 };

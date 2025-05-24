@@ -271,4 +271,40 @@ export default async (fastify) => {
       reply.code(500).send({ error: 'Lỗi khi xóa sách' });
     }
   });
+
+  fastify.get('/books/suggestions', {
+    schema: {
+      querystring:{
+        type: 'object',
+        required: ['query'],
+        properties:{
+          query: {type: 'string', minLength: 1},
+          limit: {type: 'integer', minimum: 1, maximum: 20, default: 10}
+        },
+      },
+      response: {
+        200: {
+          type: 'array',
+          items: {type: 'string'},
+        },
+      },
+    },
+  }, async (request, reply) => {
+    try{
+      const {query, limit = 10} = request.query;
+      const cacheKey = `suggestions:${query}:limit:${limit}`;
+      // const cachedSuggestions = await fastify.cache.get(cacheKey);
+      // if(cachedSuggestions){
+      //   return cachedSuggestions;
+      // }
+      // console.log(request.query);
+      const suggestions = await fastify.bookModel.getSuggestions(fastify.db, query, limit);
+      await fastify.cache.set(cacheKey, suggestions);
+      return suggestions;
+    }catch(error){
+      fastify.log.error(error);
+      reply.code(500).send({error: 'lỗi khi láy gợi ý tìm kiếm'});
+    }
+  }
+)
 };
