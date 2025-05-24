@@ -23,17 +23,11 @@ jobs:
         with:
           node-version: '22.x'
 
-      - name: Fix package.json test script
-        run: |
-          sed -i 's/"test": "echo \\"Error: no test specified\\" && exit 1"/"test": "echo \\"No tests specified\\" || exit 0"/g' package.json
-          cat package.json
-
-      - name: npm install and build
+      - name: npm install, build, and test
         run: |
           npm install
           npm run build --if-present
-          # Bỏ qua test nếu có lỗi
-          npm run test --if-present || true
+          npm run test --if-present
 
       - name: Zip artifact for deployment
         run: zip release.zip ./* -r
@@ -63,48 +57,12 @@ jobs:
       - name: Unzip artifact for deployment
         run: unzip release.zip
       
-      - name: Create web.config if not exists
-        run: |
-          if [ ! -f web.config ]; then
-            echo '<?xml version="1.0" encoding="utf-8"?>
-            <configuration>
-              <system.webServer>
-                <webSocket enabled="false" />
-                <handlers>
-                  <add name="iisnode" path="src/app.js" verb="*" modules="iisnode"/>
-                </handlers>
-                <rewrite>
-                  <rules>
-                    <rule name="StaticContent">
-                      <action type="Rewrite" url="public{REQUEST_URI}"/>
-                    </rule>
-                    <rule name="DynamicContent">
-                      <conditions>
-                        <add input="{REQUEST_FILENAME}" matchType="IsFile" negate="True"/>
-                      </conditions>
-                      <action type="Rewrite" url="src/app.js"/>
-                    </rule>
-                  </rules>
-                </rewrite>
-                <security>
-                  <requestFiltering>
-                    <hiddenSegments>
-                      <remove segment="bin"/>
-                    </hiddenSegments>
-                  </requestFiltering>
-                </security>
-                <httpErrors existingResponse="PassThrough" />
-                <iisnode watchedFiles="web.config;*.js"/>
-              </system.webServer>
-            </configuration>' > web.config
-          fi
-      
       - name: Login to Azure
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_61916C7E322D47B4927A7B1E98DA5E93 }}
-          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_A3FE334A07274C498042A7BC7EE4A3FC }}
-          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_A940622A0ED044378F35B2717CD88CEB }}
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_067463A9BE5A43E9B26FFF5D6FEFD6C7 }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_C75FF53157154651AC8AB3A31806A50F }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_604AE3CF73FE4696B251DCAC21DCA529 }}
 
       - name: 'Deploy to Azure Web App'
         id: deploy-to-webapp
@@ -113,3 +71,4 @@ jobs:
           app-name: 'sachApiFeTest'
           slot-name: 'Production'
           package: .
+          
