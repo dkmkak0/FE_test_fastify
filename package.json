@@ -20,6 +20,7 @@
     "@fastify/swagger": "^9.5.1",
     "axios": "^1.9.0",
     "bcrypt": "^5.1.0",
+    "cloudinary": "^2.6.1",
     "date-fns": "^4.1.0",
     "dotenv": "^16.5.0",
     "fastify": "^5.3.3",

@@ -1,6 +1,3 @@
-import axios from 'axios';
-import FormData from 'form-data';
-
 export default async (fastify) => {
   fastify.get('/books', {
     schema: {
@@ -36,20 +33,17 @@ export default async (fastify) => {
       
       const cacheKey = title && title.trim() !== '' ? `books:title:${title.toLowerCase()}` : 'books:all';
       
-      // Kiểm tra cache
       const cachedBooks = await fastify.cache.get(cacheKey);
       if (cachedBooks) {
         fastify.log.info(`Returning cached books for key: ${cacheKey}`);
         return cachedBooks;
       }
 
-      // Đo thời gian truy vấn
       const startTime = Date.now();
       const books = await fastify.bookModel.getAll(fastify.db, title);
       const duration = Date.now() - startTime;
       fastify.log.info(`Books retrieved: ${books.length}, Query time: ${duration}ms`);
 
-      // Lưu vào cache
       await fastify.cache.set(cacheKey, books);
       return books;
     } catch (error) {
@@ -119,7 +113,6 @@ export default async (fastify) => {
       const fields = {};
       let file;
 
-      // Parse dữ liệu từ multipart form
       for await (const part of parts) {
         if (part.file) {
           const buffer = await part.toBuffer();
@@ -134,7 +127,6 @@ export default async (fastify) => {
             filename: part.filename,
             mimetype: part.mimetype
           };
-          // Kiểm tra định dạng file
           const allowedFormats = ['image/jpeg', 'image/png', 'image/gif'];
           if (!allowedFormats.includes(file.mimetype)) {
             return reply.code(400).send({
@@ -147,7 +139,6 @@ export default async (fastify) => {
         }
       }
 
-      // Kiểm tra các trường bắt buộc
       if (!fields.title || !fields.author) {
         return reply.code(400).send({ 
           error: 'Validation failed',
@@ -155,7 +146,6 @@ export default async (fastify) => {
         });
       }
 
-      // Tạo object dữ liệu sách
       const bookData = {
         title: fields.title,
         author: fields.author,
@@ -164,46 +154,23 @@ export default async (fastify) => {
         image_url: null
       };
 
-      // Nếu có file ảnh, upload lên ImgBB
       if (file) {
-        // Kiểm tra API key
-        if (!process.env.IMGBB_API_KEY) {
-          return reply.code(400).send({ 
-            error: 'Server configuration error',
-            details: 'ImgBB API key không được thiết lập. Vui lòng kiểm tra cấu hình server.'
-          });
-        }
-
-        const formData = new FormData();
-        formData.append('image', file.buffer, file.filename);
-        formData.append('key', process.env.IMGBB_API_KEY);
-
         try {
-          const response = await axios.post('https://api.imgbb.com/1/upload', formData, {
-            headers: formData.getHeaders(),
-            timeout: 10000
+          const base64Image = file.buffer.toString('base64');
+          const dataUri = `data:${file.mimetype};base64,${base64Image}`;
+          const uploadResult = await fastify.cloudinary.uploader.upload(dataUri, {
+            resource_type: 'image',
           });
-
-          if (response.data?.data?.url) {
-            bookData.image_url = response.data.data.url;
-          } else {
-            return reply.code(400).send({ 
-              error: 'Image upload failed',
-              details: 'Không thể lấy URL ảnh từ ImgBB. Vui lòng thử lại.'
-            });
-          }
+          bookData.image_url = uploadResult.secure_url;
         } catch (error) {
-          if (error.response && error.response.status === 400) {
-            return reply.code(400).send({ 
-              error: 'Image upload failed',
-              details: 'Yêu cầu upload ảnh không hợp lệ. Có thể do API key không đúng hoặc file ảnh không được hỗ trợ (chỉ hỗ trợ JPG, PNG, GIF).'
-            });
-          }
-          throw error; // Ném lỗi khác để xử lý ở catch bên ngoài
+          fastify.log.error(error);
+          return reply.code(500).send({ 
+            error: 'Lỗi khi upload ảnh lên Cloudinary',
+            details: error.message 
+          });
         }
       }
 
-      // Lưu sách vào database
       const book = await fastify.bookModel.create(fastify.db, bookData);
       await fastify.cache.del('books:all');
       await fastify.cache.delByPrefix('books:title:');
@@ -241,7 +208,6 @@ export default async (fastify) => {
             filename: part.filename,
             mimetype: part.mimetype
           };
-          // Kiểm tra định dạng file
           const allowedFormats = ['image/jpeg', 'image/png', 'image/gif'];
           if (!allowedFormats.includes(file.mimetype)) {
             return reply.code(400).send({
@@ -268,39 +234,19 @@ export default async (fastify) => {
       };
 
       if (file) {
-        if (!process.env.IMGBB_API_KEY) {
-          return reply.code(400).send({ 
-            error: 'Server configuration error',
-            details: 'ImgBB API key không được thiết lập. Vui lòng kiểm tra cấu hình server.'
-          });
-        }
-
-        const formData = new FormData();
-        formData.append('image', file.buffer, file.filename);
-        formData.append('key', process.env.IMGBB_API_KEY);
-
         try {
-          const response = await axios.post('https://api.imgbb.com/1/upload', formData, {
-            headers: formData.getHeaders(),
-            timeout: 10000
+          const base64Image = file.buffer.toString('base64');
+          const dataUri = `data:${file.mimetype};base64,${base64Image}`;
+          const uploadResult = await fastify.cloudinary.uploader.upload(dataUri, {
+            resource_type: 'image',
           });
-
-          if (response.data?.data?.url) {
-            updates.image_url = response.data.data.url;
-          } else {
-            return reply.code(400).send({ 
-              error: 'Image upload failed',
-              details: 'Không thể lấy URL ảnh từ ImgBB. Vui lòng thử lại.'
-            });
-          }
+          updates.image_url = uploadResult.secure_url;
         } catch (error) {
-          if (error.response && error.response.status === 400) {
-            return reply.code(400).send({ 
-              error: 'Image upload failed',
-              details: 'Yêu cầu upload ảnh không hợp lệ. Có thể do API key không đúng hoặc file ảnh không được hỗ trợ (chỉ hỗ trợ JPG, PNG, GIF).'
-            });
-          }
-          throw error;
+          fastify.log.error(error);
+          return reply.code(500).send({ 
+            error: 'Lỗi khi upload ảnh lên Cloudinary',
+            details: error.message 
+          });
         }
       }
 
