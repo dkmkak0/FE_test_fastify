@@ -23,7 +23,8 @@ export default {
   async getAll(db, title = null) {
     let query = `
       SELECT 
-        id, title, author, year, description, image_url,
+        id, title, author, year, description, image_url, view_count,
+        (SELECT COUNT(*) FROM book_likes where book_id = books.id) as like_count,
         TO_CHAR(created_at, 'YYYY-MM-DD HH24:MI:SS') as created_at,
         TO_CHAR(updated_at, 'YYYY-MM-DD HH24:MI:SS') as updated_at
       FROM books
@@ -45,8 +46,22 @@ export default {
   },
 
   // Lấy sách theo ID
-  getById: async (db, id) => {
-    const result = await db.query('SELECT * FROM books WHERE id = $1', [id]);
+  getById: async (db, id, userId = null) => {
+    const query = `
+    SELECT
+    id, title, author, year, description, image_url, view_count,
+    (SELECT COUNT(*) FROM book_likes where book_id = books.id) as like_count,
+    EXISTS (
+    SELECT 1 FROM book_likes
+    WHERE book.id = books.id AND user_id = $2
+    ) as is_liked,
+     TO_CHAR(created_at, 'YYYY-MM-DD HH24:MI:SS') as created_at,
+     TO_CHAR(updated_at, 'YYYY-MM-DD HH25:MI:SS') as updated_at,
+    FROM books
+    WHERE id = $1
+    `;
+
+    const result = await db.query(query, [id, userId || '']);
     return result?.rows[0] || null;
   },
 
@@ -56,7 +71,7 @@ export default {
       console.log('Context of this in create:', this); // Log ngữ cảnh this
       const { title, author, year, description, image_url } = book;
       const result = await db.query(
-        'INSERT INTO books (title, author, year, description, image_url, created_at) VALUES ($1, $2, $3, $4, $5, NOW()) RETURNING *',
+        'INSERT INTO books (title, author, year, description, image_url, view_count, created_at) VALUES ($1, $2, $3, $4, $5, 0, NOW()) RETURNING *',
         [title, author, year, description, image_url]
       );
       const newBook = result?.rows[0] || null;
@@ -163,4 +178,38 @@ export default {
       return [];
     }
   },
+  // cái này tăng view cho job bắn
+  async increasementViewCount(db, id) {
+    try{
+      const result = await db.query(
+        'UPDATE books SET view_count = view_count + 1 WHERE id = $1 RETURNING view_count',
+        [id]
+      );
+      return result?.rows[0]?.view_count || 0;
+    }catch (error){
+      console.error('Error in incrementViewCount:', error);
+      throw error;
+    }
+  },
+  // cái này là chức năng like
+  async toggleLike(db, userId, bookId){
+    const  exists = await db.query(
+      'SELECT 1 FROM book_likes WHERE user_id = $1 AND book_id = $2',
+      [userId, bookId]
+    );
+    
+    if(exists.rowCount > 0){
+      await db.query(
+        'DELETE FROM book_likes WHERE user_id = $1 AND book_id = $2',
+        [userId, bookId]
+      );
+      return { liked: false};
+    } else{
+      await db.query(
+        'INSERT INTO book_likes (user_id, book_id, created_at) VALUES ($1, $2, NOW())',
+        [userId, bookId]
+      );
+      return {liked: true};
+    }
+  }
 };

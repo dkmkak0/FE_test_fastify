@@ -1,3 +1,5 @@
+import { format } from "date-fns";
+
 //routes/users.js
 export default async (fastify) => {
   // Đăng ký người dùng mới
@@ -148,4 +150,46 @@ export default async (fastify) => {
       reply.code(500).send({ error: 'Lỗi khi lấy thông tin người dùng' });
     }
   });
+  fastify.get('/view-history', {
+    preHandler: fastify.authenticate,
+    schema: {
+      type: 'object',
+      properties: {
+        limit: {type: 'integer', minimum: 1, maximum:50},
+      },
+    },
+    response: {
+      200: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            book_id: {type: 'integer'},
+            title: {type: 'string'},
+            author: {type: 'string'},
+            image_url: {type: 'string', nullable: true},
+            viewed_at: {type: 'string', format: 'date-time'},
+          },
+        },
+      },
+      401: {
+        type: 'object',
+        properties: {
+          error: {type: 'string'},
+        },
+      },
+    },
+  }, async (request, reply) => {
+    try {
+      const {limit = 10} = request.query;
+      const userId = request.user.id;
+      console.log('userId đang xem là: ',userId);
+      const history = await fastify.viewHistoryModel.getViewHistory(fastify.db, userId, limit);
+      return history;
+    } catch (error) {
+      fastify.log.error(error);
+      return reply.code(500).send({error: 'lỗi khi lấy lịch sử xem ', details: error.message });
+    }
+  }
+)
 };

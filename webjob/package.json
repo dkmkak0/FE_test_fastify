@@ -1,0 +1,11 @@
+{
+  "name": "sach-api-webjob",
+  "version": "1.0.0",
+  "scripts": {
+    "start": "node src/workers/view_counter.js"
+  },
+  "dependencies": {
+    "@azure/storage-queue": "^12.11.0",
+    "pg": "^8.7.3"
+  }
+}

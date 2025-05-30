@@ -11,6 +11,8 @@ import bookRoutes from './routes/books.js';
 import userRoutes from './routes/users.js';
 import 'dotenv/config';
 import { v2 as cloudinary } from 'cloudinary';
+import azureQueuePlugin from './plugins/azure_queue.js';
+import viewHistoryModel from './models/view_history.js';
 const fastify = Fastify({ 
   logger: true,
   ajv: {
@@ -38,6 +40,7 @@ fastify.register(fastifyMultipart, {
     fileSize: 32 * 1024 * 1024, // Giới hạn kích thước file (ví dụ: 10MB)
   },
 });
+fastify.register(azureQueuePlugin);
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
@@ -48,7 +51,7 @@ fastify.decorate('cloudinary', cloudinary);
 // Đăng ký models
 fastify.decorate('bookModel', bookModel);
 fastify.decorate('userModel', userModel);
-
+fastify.decorate('viewHistoryModel', viewHistoryModel);
 //nạp dữ liệu gợi ý vào bộ nhớ
 fastify.after(async () => {
   await fastify.bookModel.init(fastify.db);

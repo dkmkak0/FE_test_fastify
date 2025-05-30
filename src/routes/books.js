@@ -19,6 +19,8 @@ export default async (fastify) => {
               year: { type: 'integer' },
               description: { type: 'string' },
               image_url: { type: 'string', nullable: true },
+              view_count: {type: 'integer'},
+              like_count: {type: 'integer'},
               created_at: { type: 'string', format: 'date-time' },
               updated_at: { type: 'string', format: 'date-time', nullable: true },
             },
@@ -71,6 +73,8 @@ export default async (fastify) => {
             year: { type: 'integer' },
             description: { type: 'string' },
             image_url: { type: 'string', nullable: true },
+            view_count: {type: 'integer'},
+            like_count: {type: 'integer'},
             created_at: { type: 'string', format: 'date-time' },
             updated_at: { type: 'string', format: 'date-time', nullable: true },
           },
@@ -86,15 +90,36 @@ export default async (fastify) => {
   }, async (request, reply) => {
     try {
       const { id } = request.params;
-      const cacheKey = `book:${id}`;
-      const cachedBook = await fastify.cache.get(cacheKey);
-      if (cachedBook) {
-        return cachedBook;
+      // đang lấy user từ jwt trước
+      // do lần đầu xài nodejs nên không biết cách nào bắt user hiện tại khác cả
+      // nên tạm thời bắt từ JWT trả về để biết là có user hay không
+      let userId;
+      try{
+        await request.jwtquery();
+        userId = request.user.id;// lấy từ jwt
+      }catch  (error){
+        // không có userId nên bỏ qua
       }
 
+      // ghi sự kiện có người xem lại và bắn vào job
+      await fastify.azureQueue.sendView(id);
+      const cacheKey = `book:${id}`;
+      //nếu là khách vãng lai thì lấy từ cache luôn cho đỡ xử lý is_liked
+      if(!userId){
+        const cachedBook = await fastify.cache.get(cacheKey);
+        if (cachedBook) {
+          return cachedBook;
+        }
+      }
+      // rồi qua phần tối ưu hiệu xuất rồi, giờ mới xử lý mới nè
+      // làm gì thì làm cũng phải validate book trước đk
       const book = await fastify.bookModel.getById(fastify.db, id);
       if (!book) {
         return reply.code(404).send({ error: 'Không tìm thấy sách' });
+      }
+      // oke rồi thì tạo lịch sử xem cho người dùng nè
+      if(userId) {
+        await await fastify.viewHistoryModel.addView(fastify.db, userId, id);
       }
 
       await fastify.cache.set(cacheKey, book);
@@ -252,7 +277,6 @@ export default async (fastify) => {
 
       const updatedBook = await fastify.bookModel.update(fastify.db, id, updates);
       await fastify.cache.del('books:all');
-      await fastify.cache.delByPrefix('books:title:');
       await fastify.cache.del(`book:${id}`);
       await fastify.cache.set(`book:${id}`, updatedBook);
       return updatedBook;
@@ -350,6 +374,56 @@ export default async (fastify) => {
         error: 'Lỗi khi lấy gợi ý tìm kiếm',
         details: error.message
       });
+    }
+  });
+
+  // cái này là api cho nút like nè
+  fastify.post('/books/:id/like', {
+    preHandler: fastify.authenticate,
+    schema: {
+      params: {
+        type: 'object',
+        required: ['id'],
+        properties: {
+          id: { type: 'integer' },
+        },
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            liked: { type: 'boolean'},
+            message: { type: 'string' },
+          },
+        },
+        404: {
+          type: 'object',
+          properties: {
+            error: {type: 'string'},
+          },
+        },
+      },
+    },
+   }, async (params) => {
+    try {
+    const { id } = request.params;
+    // do ở đây bắt buộc có jwt rồi nên bắt luôn user được
+    const userId = request.user.id;
+    //validate book
+    const book = await fastify.bookModel.getById(fastify.db, id);
+    if(!book) {
+      return reply.code(404).send({error: 'không tìm thấy sách'});
+    }
+
+    const result = await fastify.bookModel.toggleLike(fastify.db, userId, id);
+
+    return {
+      liked: result.liked,
+      message: result.liked? 'Thích thành công' : 'bỏ thích thành công',
+    };
+    } catch (error) {
+      fastify.log.error(error);
+      return reply.code(500).send({error: 'Lỗi khi thực hiện hành động thích sách', details: error.message});
     }
   });
 };
