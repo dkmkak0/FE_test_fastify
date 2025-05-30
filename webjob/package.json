@@ -6,6 +6,7 @@
   },
   "dependencies": {
     "@azure/storage-queue": "^12.11.0",
+    "cloudinary": "^2.6.1",
     "pg": "^8.7.3"
   }
 }
