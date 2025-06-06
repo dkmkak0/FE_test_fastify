@@ -4,9 +4,14 @@
   "main": "src/app.js",
   "type": "module",
   "scripts": {
-    "test": "echo \"No tests specified\" && exit 0",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
     "start": "node src/app.js",
-    "dev": "nodemon src/app.js"
+    "dev": "nodemon src/app.js",
+    "automation": "node test-automation.js",
+    "test:automation": "node start-tests.js",
+    "test:generate": "node lib/test-generator.js"
   },
   "keywords": [],
   "author": "",
