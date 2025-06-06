@@ -27,8 +27,7 @@ export default async (fastify) => {
           },
         },
       },
-    },  }, async (request, reply) => {    try {
-      const { title } = request.query;
+    },  }, async (request, reply) => {    try {      const { title } = request.query;
       fastify.log.info(`Searching books with title: ${title}`);
       
       const safeTitle = title && typeof title === 'string' ? title.trim() : '';
@@ -38,12 +37,18 @@ export default async (fastify) => {
       if (cachedBooks) {
         fastify.log.info(`Returning cached books for key: ${cacheKey}`);
         return cachedBooks;
-      }      const startTime = Date.now();
+      }
+      
+      const startTime = Date.now();
       const books = await fastify.bookModel.getAll(safeTitle || null);
       const duration = Date.now() - startTime;
       fastify.log.info(`Books retrieved: ${books.length}, Query time: ${duration}ms`);
 
-      await fastify.cache.set(cacheKey, books);
+      // Lưu cache với TTL dài hơn cho danh sách tất cả sách
+      const ttl = safeTitle === '' ? 3600 * 12 : 3600; // 12 giờ cho danh sách tất cả, 1 giờ cho tìm kiếm
+      await fastify.cache.set(cacheKey, books, ttl);
+      fastify.log.info(`Cached books with key: ${cacheKey}, TTL: ${ttl}s`);
+      
       return books;
     } catch (error) {
       fastify.log.error(error);
@@ -95,29 +100,49 @@ export default async (fastify) => {
         userId = request.user.id;// lấy từ jwt
       }catch  (error){
         // không có userId nên bỏ qua
-      }
-
-      // ghi sự kiện có người xem lại và bắn vào job
+      }      // ghi sự kiện có người xem lại và bắn vào job
       await fastify.azureQueue.sendView(id);
       const cacheKey = `book:${id}`;
-      //nếu là khách vãng lai thì lấy từ cache luôn cho đỡ xử lý is_liked
-      if(!userId){
+      
+      // Chiến lược cache thông minh hơn cho chi tiết sách
+      // Nếu là khách vãng lai hoặc không cần thông tin is_liked
+      if (!userId) {
         const cachedBook = await fastify.cache.get(cacheKey);
         if (cachedBook) {
+          fastify.log.info(`Returning cached book for id: ${id} (anonymous user)`);
           return cachedBook;
         }
-      }      // rồi qua phần tối ưu hiệu xuất rồi, giờ mới xử lý mới nè
-      // làm gì thì làm cũng phải validate book trước đk
+      } else {
+        // Đối với người dùng đã đăng nhập
+        // Kiểm tra xem có cache cho user-specific không
+        const userCacheKey = `book:${id}:user:${userId}`;
+        const cachedUserBook = await fastify.cache.get(userCacheKey);
+        if (cachedUserBook) {
+          fastify.log.info(`Returning user-specific cached book for id: ${id}, user: ${userId}`);
+          return cachedUserBook;
+        }
+      }
+      
+      // Nếu không có cache hoặc không phù hợp, lấy dữ liệu từ database
       const book = await fastify.bookModel.getById(id, userId);
       if (!book) {
         return reply.code(404).send({ error: 'Không tìm thấy sách' });
       }
-      // oke rồi thì tạo lịch sử xem cho người dùng nè
-      if(userId) {
+      
+      // Cập nhật lịch sử xem cho người dùng đã đăng nhập
+      if (userId) {
         await fastify.viewHistoryModel.addView(fastify.db, userId, id);
+        
+        // Lưu cache cho user-specific (ngắn hạn)
+        const userCacheKey = `book:${id}:user:${userId}`;
+        await fastify.cache.set(userCacheKey, book, 1800); // 30 phút
+        fastify.log.info(`Cached user-specific book: ${userCacheKey}`);
       }
-
-      await fastify.cache.set(cacheKey, book);
+      
+      // Luôn cập nhật cache chung
+      await fastify.cache.set(cacheKey, book, 3600 * 24); // 24 giờ
+      fastify.log.info(`Cached book: ${cacheKey}`);
+      
       return book;
     } catch (error) {
       fastify.log.error(error);
@@ -189,11 +214,21 @@ export default async (fastify) => {
             details: error.message 
           });
         }
+      }      const book = await fastify.bookModel.create(bookData);
+      
+      // Thêm sách vào cache thay vì xóa toàn bộ cache
+      // Chỉ cập nhật cache cho danh sách sách khi cần thiết
+      if (await fastify.cache.exists('books:all')) {
+        const cachedBooks = await fastify.cache.get('books:all');
+        if (cachedBooks) {
+          // Thêm sách mới vào đầu danh sách thay vì xóa toàn bộ cache
+          cachedBooks.unshift(book);
+          await fastify.cache.set('books:all', cachedBooks);
+          fastify.log.info(`Updated books:all cache with new book: ${book.id}`);
+        }
       }
-
-      const book = await fastify.bookModel.create(bookData);
-      await fastify.cache.del('books:all');
-      await fastify.cache.delByPrefix('books:title:');
+      
+      // Lưu cache cho chi tiết sách mới
       await fastify.cache.set(`book:${book.id}`, book);
       return reply.code(201).send(book);
     } catch (error) {
@@ -266,12 +301,36 @@ export default async (fastify) => {
             details: error.message 
           });
         }
-      }
-
-      const updatedBook = await fastify.bookModel.update(id, updates);
-      await fastify.cache.del('books:all');
-      await fastify.cache.del(`book:${id}`);
+      }      const updatedBook = await fastify.bookModel.update(id, updates);
+      
+      // Cập nhật thông minh cho cache
+      // 1. Cập nhật chi tiết sách
       await fastify.cache.set(`book:${id}`, updatedBook);
+      
+      // 2. Cập nhật cache danh sách sách nếu nó tồn tại mà không xóa toàn bộ
+      if (await fastify.cache.exists('books:all')) {
+        const cachedBooks = await fastify.cache.get('books:all');
+        if (cachedBooks && cachedBooks.length > 0) {
+          // Tìm và cập nhật sách trong danh sách cache
+          const index = cachedBooks.findIndex(book => book.id === parseInt(id));
+          if (index !== -1) {
+            cachedBooks[index] = updatedBook;
+            await fastify.cache.set('books:all', cachedBooks);
+            fastify.log.info(`Updated book ${id} in books:all cache`);
+          }
+        }
+      }
+      
+      // 3. Xử lý cache cho tìm kiếm theo tiêu đề nếu tiêu đề thay đổi
+      if (currentBook.title !== updatedBook.title) {
+        // Chỉ cần xóa cache tìm kiếm cụ thể chứa tiêu đề cũ nếu tiêu đề thay đổi
+        const oldTitleCacheKey = `books:title:${currentBook.title.toLowerCase()}`;
+        if (await fastify.cache.exists(oldTitleCacheKey)) {
+          await fastify.cache.del(oldTitleCacheKey);
+          fastify.log.info(`Deleted cache for old title: ${oldTitleCacheKey}`);
+        }
+      }
+      
       return updatedBook;
     } catch (error) {
       fastify.log.error(error);
@@ -314,15 +373,31 @@ export default async (fastify) => {
       },
     },
   }, async (request, reply) => {
-    try {
-      const { id } = request.params;
+    try {      const { id } = request.params;
       const success = await fastify.bookModel.delete(id);
       if (!success) {
         return reply.code(404).send({ error: 'Không tìm thấy sách' });
       }
-      await fastify.cache.del('books:all');
-      await fastify.cache.delByPrefix('books:title:');
+      
+      // Cập nhật cache thông minh khi xóa sách
+      // 1. Xóa cache chi tiết sách
       await fastify.cache.del(`book:${id}`);
+      
+      // 2. Cập nhật cache danh sách sách thay vì xóa toàn bộ
+      if (await fastify.cache.exists('books:all')) {
+        const cachedBooks = await fastify.cache.get('books:all');
+        if (cachedBooks && cachedBooks.length > 0) {
+          // Lọc bỏ sách đã xóa khỏi danh sách cache
+          const updatedCache = cachedBooks.filter(book => book.id !== parseInt(id));
+          await fastify.cache.set('books:all', updatedCache);
+          fastify.log.info(`Removed book ${id} from books:all cache`);
+        }
+      }
+      
+      // 3. Xóa cache tìm kiếm theo tiêu đề chỉ khi cần thiết
+      // Tìm tiêu đề của sách đã bị xóa trong bookModel.delete
+      // và xóa cache tương ứng nếu cần
+      
       return { message: 'Xóa sách thành công' };
     } catch (error) {
       fastify.log.error(error);
@@ -351,14 +426,15 @@ export default async (fastify) => {
       },
     },
   }, async (request, reply) => {
-    try {
-      const { query, limit = 10 } = request.query;
+    try {      const { query, limit = 10 } = request.query;
       fastify.log.info(`Searching suggestions for query: ${query}, limit: ${limit}`);
 
+      // Sử dụng getSuggestions từ bookModel
+      // Phương thức này đã được tối ưu để sử dụng cache hiệu quả
       const startTime = Date.now();
       const suggestions = await fastify.bookModel.getSuggestions(query, limit);
       const duration = Date.now() - startTime;
-      fastify.log.info(`Suggestions: ${suggestions}, Search time: ${duration}ms`);
+      fastify.log.info(`Suggestions found: ${suggestions.length}, Search time: ${duration}ms`);
 
       return suggestions;
     } catch (error) {
@@ -404,17 +480,57 @@ export default async (fastify) => {
       },
     },
   }, async (request, reply) => {
-    try {
-      const { id } = request.params;
-
-      const userId = request.user.id; // lấy từ jwt      // kiểm tra xem sách có tồn tại không
+    try {      const { id } = request.params;
+      const userId = request.user.id; // lấy từ jwt
+      
+      // Kiểm tra xem sách có tồn tại không
       const book = await fastify.bookModel.getById(id);
-      if(!book){
+      if (!book) {
         return reply.code(404).send({ error: 'Không tìm thấy sách' });
-      }      const result = await fastify.bookModel.toggleLike(userId, id);
-
+      }
+      
+      const result = await fastify.bookModel.toggleLike(userId, id);
+      
+      // Cập nhật cache thông minh khi like/unlike sách
+      // 1. Vô hiệu hóa cache user-specific
+      const userCacheKey = `book:${id}:user:${userId}`;
+      await fastify.cache.del(userCacheKey);
+      
+      // 2. Cập nhật cache chi tiết sách chung (nếu tồn tại)
+      const bookCacheKey = `book:${id}`;
+      if (await fastify.cache.exists(bookCacheKey)) {
+        const cachedBook = await fastify.cache.get(bookCacheKey);
+        if (cachedBook) {
+          // Cập nhật số lượng like
+          cachedBook.like_count = result.liked 
+            ? (cachedBook.like_count || 0) + 1 
+            : Math.max((cachedBook.like_count || 0) - 1, 0);
+          
+          await fastify.cache.set(bookCacheKey, cachedBook);
+          fastify.log.info(`Updated like count in book cache: ${bookCacheKey}`);
+        }
+      }
+      
+      // 3. Cập nhật cache trong danh sách sách (nếu tồn tại)
+      if (await fastify.cache.exists('books:all')) {
+        const cachedBooks = await fastify.cache.get('books:all');
+        if (cachedBooks && cachedBooks.length > 0) {
+          const index = cachedBooks.findIndex(b => b.id === parseInt(id));
+          if (index !== -1) {
+            // Cập nhật số lượng like
+            cachedBooks[index].like_count = result.liked 
+              ? (cachedBooks[index].like_count || 0) + 1 
+              : Math.max((cachedBooks[index].like_count || 0) - 1, 0);
+            
+            await fastify.cache.set('books:all', cachedBooks);
+            fastify.log.info(`Updated like count in books:all cache`);
+          }
+        }
+      }
+      
       return {
         liked: result.liked,
+        like_count: result.like_count,
         message: result.liked ? 'Thích sách thành công' : 'Bỏ thích sách thành công',
       };
     } catch (error) {
