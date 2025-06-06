@@ -3,7 +3,7 @@ export default {
     async addView(db, userId, bookId) {
         try {
             const result = await db.query(
-                'INSERT INTO view_history (user_id, book_id, viewed_at) VALUES ($1, $2, NOW() RETURNING *)',
+                'INSERT INTO view_history (user_id, book_id, viewed_at) VALUES ($1, $2, NOW()) RETURNING *',
                 [userId, bookId]
             );
             return result?.rows[0] ?? null;

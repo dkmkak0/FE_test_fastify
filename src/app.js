@@ -4,7 +4,6 @@ import cors from '@fastify/cors';
 import fastifyMultipart from '@fastify/multipart';
 import databasePlugin from './plugins/database.js';
 import authPlugin from './plugins/auth.js';
-import cachePlugin from './plugins/cache.js';
 import bookModel from './models/book.js';
 import userModel from './models/user.js';
 import bookRoutes from './routes/books.js';
@@ -13,6 +12,8 @@ import 'dotenv/config';
 import { v2 as cloudinary } from 'cloudinary';
 import azureQueuePlugin from './plugins/azure_queue.js';
 import viewHistoryModel from './models/view_history.js';
+import redisPlugin from './plugins/redis.js';
+
 const fastify = Fastify({ 
   logger: true,
   ajv: {
@@ -22,9 +23,6 @@ const fastify = Fastify({
       useDefaults: true,
     },
   },
-});
-fastify.register(cachePlugin, {
-    ttl: 30000 // 5 phút cache TTL
 });
 
 // Đăng ký plugins
@@ -37,7 +35,7 @@ fastify.register(databasePlugin);
 fastify.register(authPlugin);
 fastify.register(fastifyMultipart, {
   limits: {
-    fileSize: 32 * 1024 * 1024, // Giới hạn kích thước file (ví dụ: 10MB)
+    fileSize: 32 * 1024 * 1024, // Giới hạn kích thước file (32MB)
   },
 });
 fastify.register(azureQueuePlugin);
@@ -47,16 +45,18 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 fastify.decorate('cloudinary', cloudinary);
+fastify.register(redisPlugin);
 
 // Đăng ký models
-fastify.decorate('bookModel', bookModel);
+fastify.decorate('bookModel', bookModel(fastify));
 fastify.decorate('userModel', userModel);
 fastify.decorate('viewHistoryModel', viewHistoryModel);
+
 //nạp dữ liệu gợi ý vào bộ nhớ
 fastify.after(async () => {
-  await fastify.bookModel.init(fastify.db);
+  await fastify.bookModel.getTitles();
   fastify.log.info('đã load xong dữ liệu gợi ý');
-})
+});
 
 // Đăng ký routes
 fastify.register(bookRoutes, { prefix: '/api' });
@@ -79,17 +79,16 @@ fastify.setErrorHandler((error, request, reply) => {
     error: error.message || 'Lỗi server' 
   });
 });
-//cloudinary
-
 
 // Khởi động server
 const start = async () => {
   try {
+    const port = process.env.PORT || 8080;
     await fastify.listen({ 
-      port: process.env.PORT || 8080, 
+      port: port, 
       host: '0.0.0.0' 
     });
-    console.log(`Server đang chạy tại ${fastify.server.address().port}`);
+    fastify.log.info(`Server đang chạy tại cổng ${port}`);
   } catch (err) {
     fastify.log.error(err);
     process.exit(1);
