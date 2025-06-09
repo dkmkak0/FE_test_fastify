@@ -4,34 +4,74 @@ export default async (fastify) => {
       querystring: {
         type: 'object',
         properties: {
-          title: { type: 'string', minLength: 1 },
+          title: { type: 'string', default: ''},
+          page: { type: 'string',  default: 1},
+          limit: { type: 'string',  default: 20},
+          sort: {type: 'string', enum: ['newest', 'oldest', 'popular', 'like_count', 'view_count'], default: 'newest'},
+          author: { type: 'string', default: ''},
         },
       },
       response: {
         200: {
-          type: 'array',
-          items: {
+          type: 'object',
+          properties: {
+          success: {type: 'boolean'},
+          data: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'integer' },
+                title: { type: 'string' },
+                author: { type: 'string' },
+                year: { type: 'integer' },
+                description: { type: 'string' },
+                image_url: { type: 'string', nullable: true },
+                view_count: {type: 'integer'},
+                like_count: {type: 'integer'},
+                created_at: { type: 'string', format: 'date-time' },
+                updated_at: { type: 'string', format: 'date-time', nullable: true },
+              },
+            },
+          },
+          pagination:{
             type: 'object',
             properties: {
-              id: { type: 'integer' },
-              title: { type: 'string' },
-              author: { type: 'string' },
-              year: { type: 'integer' },
-              description: { type: 'string' },
-              image_url: { type: 'string', nullable: true },
-              view_count: {type: 'integer'},
-              like_count: {type: 'integer'},
-              created_at: { type: 'string', format: 'date-time' },
-              updated_at: { type: 'string', format: 'date-time', nullable: true },
-            },
+              page: { type: 'integer'},
+              limit: {type: 'integer'},
+              total: {type: 'integer'},
+              total_pages: {type: 'integer'},
+              returned: {type: 'integer'},
+              hasNext: {type: 'boolean'},
+              hasPrevious: {type: 'boolean'},
+            }
           },
         },
       },
-    },  }, async (request, reply) => {    try {      const { title } = request.query;
-      fastify.log.info(`Searching books with title: ${title}`);
-      
-      const safeTitle = title && typeof title === 'string' ? title.trim() : '';
-      const cacheKey = safeTitle !== '' ? `books:title:${safeTitle.toLowerCase()}` : 'books:all';
+    },
+    },  }, async (request, reply) => {    try {      
+      const { title, sort = 'newest', author } = request.query;
+      const rawQuery = request.query;
+      // tương đương với lệnh
+      // const title = request.query.title || '';
+      // const page = request.query.page || 1;
+      // const limit = request.query.limit || 20;
+      // const sort = request.query.sort || 'newest';
+      // const author = request.query.author || null;
+      const page = rawQuery.page && rawQuery.page.trim() !== '' 
+        ? Math.max(1, parseInt(rawQuery.page) || 1) 
+        : 1;
+        
+      const limit = rawQuery.limit && rawQuery.limit.trim() !== '' 
+        ? Math.min(100, Math.max(1, parseInt(rawQuery.limit) || 20))
+        : 20;
+      fastify.log.info(`GET /books - title: "${title || 'all'}", author: "${author || 'all'}", sort: ${sort}, page: ${page}, limit: ${limit}`);
+      // duyệt lại các tham số đầu vào, vì trong JS nếu không có giá trị thì sẽ là undefined
+      // nên cần kiểm tra nếu không có giá trị thì sẽ là null
+      const safeTitle = title && typeof title === 'string' ? title.trim() : ''; 
+      const safeAuthor = author && typeof author === 'string' ? author.trim() : '';
+      // Tạo cache key dựa trên tiêu đề và các tham số khác
+      const cacheKey = `books:${safeTitle || 'all'}:${safeAuthor || 'all'}:${sort}:p${page}:l${limit}`;
       
       const cachedBooks = await fastify.cache.get(cacheKey);
       if (cachedBooks) {
@@ -40,12 +80,37 @@ export default async (fastify) => {
       }
       
       const startTime = Date.now();
-      const books = await fastify.bookModel.getAll(safeTitle || null);
+      // cái này là JS modern, gọi như là đối tượng luôn, thiếu trường cũng không sao
+      // vmặc dù đã validate kỹ ở trên rồi =)), cẩn tắc vô áy náy mà đúng không các bạn
+      const books = await fastify.bookModel.getAll({
+        title: safeTitle || null,
+        author: safeAuthor || null,
+        sort: sort,
+        page: page, 
+        limit: limit,
+
+      });
+      // cái này để tính time thôi, làm sẵn, vì đường nào sau này cũng cần tối ưu
+      // mặc dù hiện tại đã tối ưu rồi
+      // nhưng vẫn cần để biết thời gian truy vấn
+      // và có thể tối ưu hơn nữa nếu cần thiết
+      // 6/8/2025 - <0,2s do mạng - chắc tối ưu hơn thì query thẳng chỉ mục với dùng thuật toán query thôi
       const duration = Date.now() - startTime;
-      fastify.log.info(`Books retrieved: ${books.length}, Query time: ${duration}ms`);
+      const dataLength = books.data ? books.data.length : 0;
+      fastify.log.info(`Books retrieved: ${dataLength}, Query time: ${duration}ms`);
 
       // Lưu cache với TTL dài hơn cho danh sách tất cả sách
-      const ttl = safeTitle === '' ? 3600 * 12 : 3600; // 12 giờ cho danh sách tất cả, 1 giờ cho tìm kiếm
+      let ttl;
+      if(!safeTitle && !safeAuthor && page === 1 && sort === 'newest') {
+      //Homepage: lưu cache 12 tiếng
+      ttl = 3600 * 12; // 12 hours
+      } else if(safeTitle || safeAuthor) {
+        // cai này là tìm kiếm theo tiêu đề hoặc tác giả lưu ngắn thôi
+        ttl = 3600 * 2; // 2 hour
+      } else { 
+        // cái này là phân trang với filter lưu vừa
+        ttl = 3600 * 6;
+      }
       await fastify.cache.set(cacheKey, books, ttl);
       fastify.log.info(`Cached books with key: ${cacheKey}, TTL: ${ttl}s`);
       

@@ -1,0 +1,81 @@
+; Ờm cái dự án này ấy
+; Thực ra mục đích chính là để train 2 thằng bạn mới ra trường của tui (' - ')b
+; Tại vì tụi nó mới ra trường, nên là chưa có kinh nghiệm gì cả
+; Chứ chả có ý gì khác đâu
+; Nhưng mà giữa lúc tui làm, thì nó là giai đoạn khủng hoảng kinh tế
+; Nên các trang web ở Việt Nam không bị ăn gậy, thì cũng sập do chí phí duy trì quá cao
+; Nên là sẵn tui đang làm cái source này, thì tui giải quyết luôn vấn đề này
+; Tại sao ư?
+; Vì tui thấy các trang web ở Việt Nam hiện tại đều có vấn đề về tốc độ
+; Và chi phí vận hành cao vl (vì hosting đắt vcl) mặc dù traffic như cái đầu bòi
+; Mấy trang ngày xưa tui hay xem, giờ nó sập hết rồi
+; Hoặc còn sống lay lắt như valvareTeam chẳng hạn, nhìn cái UI như muốn đấm vào mắt người đọc
+; Nhưng mà truyện trên đó thì vẫn hay ( ' - ') 
+; Nên là tui thấy không thể để nó chết được
+; Nên là tui làm cái source này, để các bạn có thể tự host lại các trang web đó
+; Tui làm cái này nó như là trang trung gian giữa các nhóm dịch và người dùng thôi, như Cuutruyen á
+; Mà sẵn source của tui, xài Fastify API, nó nhẹ VL (' - ')b
+; Vì cái mẹ gì cũng phải viết, validate request, response, error handling
+; Cái gì cũng phải viết cả, thành ra nó có cái gì nặng đâu
+; Thư viện thì có cái siêng thì tui viết, không thì viết ngay function luôn
+; Nên là nó nhẹ lắm, chỉ có 1.5MB thôi
+; Và vì nó nhẹ, nên là tui có thể host trên VPS rẻ tiền
+; Tui có thể host trên VPS 1GB RAM, 1 CPU, 20GB SSD, chỉ có 50k/tháng thôi
+; Và nó chạy rất mượt, không có vấn đề gì cả
+; Tất nhiên là DB và Redis thì phải dùng VPS khác, vì nó cần RAM nhiều hơn
+; Nhưng mà hiện tại AIVEN đang nổi lên với quả free 1GB RAM, 1 CPU, 1GB SSD
+; Nên là tui nghĩ là các bạn có thể dùng AIVEN để host DB và Redis
+; Tui đang xài thấy khá oke, không có vấn đề gì cả
+; Mong sao họ làm ăn được thì sẽ không bị sập (' - ')b
+; Tui cũng có làm cái demo cho các bạn xem, nhưng mà do nó là private repo để bỏ vào CV
+; Chứ làm cho đã xong rồi nó cũng chỉ là hàng public thì đâu có ý nghĩa gì
+; Mà đem bỏ CV thì cũng không hay lắm
+; Nên là các bạn không thể xem được (' - ')b
+; Nhưng mà nếu các bạn muốn xem, thì có thể liên hệ với tui qua Discord
+; Mà tui nghĩ cái này Dev cũng cần hiểu biết xíu xíu nha
+; Tại nó yêu cầu tự viết nặng lắm á, còn bonus thêm framework chả có ma nào xài ở Việt Nam lun (' - ')b
+; Oke thôi, tới đây thôi nha
+; Cảm ơn các bạn đã đọc tới đây
+
+🚀 Tên Dự Án
+Tự Host Web Truyện Nhẹ & Tiết Kiệm
+
+📝 Mục Đích Dự Án
+Dự án này ra đời với mục đích chính là đào tạo hai bạn mới ra trường của mình, giúp các bạn có thêm kinh nghiệm thực tế khi làm việc với dự án web.
+
+Bên cạnh đó, trong bối cảnh kinh tế khó khăn, nhiều website truyện ở Việt Nam đã bị sập do chi phí vận hành quá cao. Mình muốn giải quyết vấn đề này bằng cách tạo ra một source code nhẹ, tiết kiệm, giúp các bạn có thể tự host lại các trang web truyện yêu thích.
+
+🛠️ Đặc Điểm Nổi Bật
+Nhẹ và nhanh: Sử dụng Fastify API, code tối ưu, chỉ nặng 1.5MB.
+
+Chi phí vận hành thấp: Có thể chạy ổn định trên VPS chỉ 1GB RAM, 1 CPU, 20GB SSD (khoảng 50k/tháng).
+
+Dễ mở rộng: Tách biệt database (DB) và Redis ra server riêng để tối ưu hiệu năng.
+
+Sử dụng AIVEN miễn phí: Có thể dùng AIVEN để host DB và Redis với 1GB RAM, 1 CPU, 1GB SSD miễn phí.
+
+Làm trung gian giữa nhóm dịch và người dùng: Giống như Cuutruyen, giúp duy trì các trang truyện cũ.
+
+Ờm thì đồng ý là tui viết 1 dòng code thì tui comment phải 7 dòng lận, vì train mà, mình không hiểu kỹ thì làm sao train nổi đúng không
+Nên là thông cảm giúp tui nha (' - ')b
+🔍 Lý Do Chọn Fastify
+Nhẹ và hiệu quả: Fastify API giúp xử lý request, response, error handling rất nhanh và gọn gàng.
+
+Tự viết nhiều thứ: Để đảm bảo code nhẹ, nhiều phần mình tự viết thay vì dùng thư viện nặng.
+
+Ít ai dùng ở Việt Nam: Đây cũng là cơ hội để các bạn làm quen với framework mới, nâng cao kỹ năng. Tui điêu ấy ( ' - ')b
+
+🚫 Demo & Source Code
+Demo: Hiện tại mình chỉ để private repo để bổ sung vào CV, nên chưa public demo cho mọi người xem.
+
+Nếu bạn muốn xem demo hoặc source code: Hãy liên hệ với mình qua Discord.
+
+Yêu cầu: Bạn cần có chút kiến thức về backend và tự tin tự viết code, vì dự án này yêu cầu tự làm nhiều phần.
+
+💬 Liên Hệ
+Nếu bạn quan tâm hoặc muốn hợp tác, đừng ngại liên hệ với mình qua Discord!
+
+💖 Cảm Ơn
+Cảm ơn bạn đã đọc đến đây! Mong rằng dự án này sẽ giúp ích cho cộng đồng và các bạn dev mới vào nghề.
+
+Chúc các bạn code vui! 🚀

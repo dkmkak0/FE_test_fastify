@@ -150,31 +150,226 @@ export default function bookModel(fastify) {
     },
     /**
      * Retrieves all books from the database, optionally filtered by title.
-     * If a title is provided, it filters books whose titles contain the given string (case-insensitive).
-     * * The result includes book details such as id, title, author, year, description, image_url,
-     * view_count, like_count, created_at, and updated_at.
-     * * @param {string|null} title - The title to filter books by, or null to retrieve all books.
-     * * @returns {Promise<Array>} - A promise that resolves to an array of book objects.
+     * phân trang giúp chia nhỏ dữ liệu thành các trang nhỏ để tăng hiệu suất và trải nghiệm người dùng.
+     *
+     * * @param {string|null} title - tiêu đề để lọc sách, null sẽ lấy tất cả sách
+     * * @param {number} page - số trang (mặc định là 1). ví dụ page = 1 sẽ lấy trang đầu tiên
+     * * @param {number} limit - số lượng sách trên mỗi trang (mặc định lấy 20) ví dụ limit = 20 thì sẽ lấy 20 sách
+     * * @returns {Promise<Array>} - object chứa danh sách và tổng số sách.
      * * @throws {Error} - Throws an error if the database query fails.
      * */
-    async getAll(title = null) {
-      let query = `
-      SELECT 
-        id, title, author, year, description, image_url,
-        view_count, 
-        (SELECT COUNT(*) FROM book_likes WHERE book_id = books.id) as like_count,
-        TO_CHAR(created_at, 'YYYY-MM-DD HH24:MI:SS') as created_at,
-        TO_CHAR(updated_at, 'YYYY-MM-DD HH24:MI:SS') as updated_at
-      FROM books
-    `;
-      const params = [];      if (title && typeof title === 'string' && title.trim() !== '') {
-        query += ` WHERE title ILIKE $1`;
-        params.push(`%${title}%`);
-      }
+    async getAll({title = null, page = 1, limit = 20, author = null, sort = 'newest'} = {}) {
+      try {
+        // Bước 1: Validate - kiểm tra chuẩn hoá dữ liệu đầu vào
+        // Đảm bảo page luôn >= 1, ngay cả khi FE gửi giá trị là như "0" hoặc "1.5"
+        const currentPage = Math.max(1, parseInt(page) || 1);
 
-      query += ` ORDER BY created_at DESC`;
-      const result = await fastify.db.query(query, params);
-      return result?.rows || [];
+        // Đảm bảo limit luôn trong khoản 1-100 để tránh quá tải(lúc này server chỉ có 1 core 1GB ram)
+        // hàm Math.max(1, ...) là đảm bảo tối thiểu 1
+        // hàm Math.min(100, ...) là đảm bảo tối đa là 100
+        const pageSize = Math.min(100, Math.max(1, parseInt(limit) || 20));
+
+        // Tính toán offset - tính toán vị trí bắt đầu của dữ liệu
+        // Offset: là vị trí bắt đầu lấy dữ liệu trong cơ sở dữ liệu.
+        // ví dụ: offset 20 tức là sẽ bỏ qua 20 bản ghi đầu tiên.
+        // Công thức: (trang_hiện_tại - 1) x số_lượng_mỗi_trang
+        // Ví dụ: Trang 3, mỗi trang 20 sách, offset = (3 -1) x 20 = 40
+        const offset = (currentPage - 1) * pageSize;
+
+        fastify.log.info(`GetAll called: title = "${title || 'all'}, page = ${currentPage}, limit = ${pageSize}`);
+
+        // Bước 2: Xây dựng Where Clause - điều kiện lọc dữ liệu
+        const conditions = []; // chuỗi điều kiện WHERE cho SQL
+        const baseParams = []; // Mảng parameters cho query đếm
+
+        // kiểm tra xem có cần lọc theo title không
+        if(title && typeof title === 'string' && title.trim() !== '') {
+          // ờm chỗ này tui giải thích rõ hơn nhé
+          // nếu có title thì thêm điều kiện lọc title vào whereClause
+          // ILIKE là so sánh không phân biệt chữ hoa chữ thường
+          //${baseParams.length + 1} là vị trí của tham số trong query
+          // ví dụ: nếu baseParams.length = 0 thì vị trí của title sẽ là $1
+          // nếu baseParams.length = 1 thì vị trí của title sẽ là $2
+          // nếu baseParams.length = 2 thì vị trí của title sẽ là $3
+          // và cứ thế tiếp tục
+          // Điều này giúp tránh việc phải thay đổi query mỗi khi có thêm điều kiện lọc
+          // tiện hơn hẳn đúng chứ, nên mấy cái if tiếp theo y chóc cái này
+          // vì chẳng biết là tui cải tiến cái này tới bao giờ nữa
+          // nhưng mà chắc chắn là kiểu gì cũng có nhiều điều kiện lọc hơn nữa
+          // nên cứ để như này cho nó tiện
+          //9/6/2025
+          // ờm thì tui thêm index vào database để tăng tốc độ truy vấn
+          // vì nếu không có index thì truy vấn sẽ chậm hơn rất nhiều
+          // nhưng mà tui đánh index bằng gin
+          // mà gin nó support mỗi tiếng anh à, nên tui phải đánh bằng lowercase
+          conditions.push(`lower(books.title) ILIKE lower($${baseParams.length + 1})`); // Thêm điều kiện lọc title vào mảng conditions
+          // cái baseParams này là cái gì? Chắc kèo ai cũng hỏi đúng không?
+          // baseParams là mảng chứa các tham số sẽ được thay thế vào query
+          // ví dụ: nếu title = "Harry Potter" thì baseParams sẽ là ['%Harry Potter%']
+          // và query sẽ là: "SELECT ... FROM books WHERE title ILIKE $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3"
+          // cái này là để tránh việc phải thay đổi query mỗi khi có thêm điều kiện lọc
+          // và cũng để tránh việc phải thay đổi vị trí của LIMIT và OFFSET trong query
+          // vì nếu có title thì vị trí của LIMIT sẽ là baseParams.length + 1
+          // còn vị trí của OFFSET sẽ là baseParams.length + 2
+          // nếu không có title thì vị trí của LIMIT sẽ là 1
+          // còn vị trí của OFFSET sẽ là 2
+          // đấy xịn thế còn gì nữa ( ' - ')b
+          // và cái % ở đầu và cuối là để tìm kiếm, mà cái này cơ bản chắc ai cũng biết rồi
+          // nên tui không giải thích nữa
+          baseParams.push(`%${title.trim()}%`); // THêm điều kiện lọc title vào mảng params
+          fastify.log.info(`Filtering by title: ${title}`); 
+        }
+        if(author && typeof author === 'string' && author.trim() !== ''){
+          // nếu có author thì thêm điều kiện lọc ở trên giải thích rồi ấy
+          conditions.push(`lower(books.author) ILIKE lower($${baseParams.length + 1})`);
+          baseParams.push(`%${author.trim()}%`);
+          fastify.log.info(`Added author filter: ${author}`);
+        }
+
+        // Bước 2.1: Xử lý sort - sắp xếp dữ liệu
+        // sort là cái để sắp xếp dữ liệu, mặc định là newest
+        // nếu sort là newest thì sắp xếp theo created_at DESC
+        // nếu sort là oldest thì sắp xếp theo created_at ASC
+        // nếu sort là view_count thì sắp xếp theo view_count DESC
+        // nếu sort là like_count thì sắp xếp theo like_count DESC
+        // chỉ vậy thôi, dễ mà đúng hơm (' - ')b
+        let orderBy;
+        switch (sort) {
+          case 'oldest':
+            orderBy = 'ORDER BY books.created_at ASC';
+            break;
+          case 'popular': //cái này là phổ biến ấy
+            orderBy = 'ORDER BY books.view_count DESC,  books.like_count DESC, books.created_at DESC';
+            break;
+          case 'like_count': // cái này là yêu thích nhất
+            orderBy = 'ORDER BY books.like_count Desc, books.created_at DESC';
+            break;
+          case 'view_count': // cái này là lượt xem nhiều nhất
+            orderBy = 'ORDER BY books.view_count DESC, books.created_at DESC';
+            break;
+          case 'newest': // cái này là mới nhất cũng là mặc định luôn
+          default:
+            orderBy = 'ORDER BY books.created_at DESC';
+            break;
+        }
+        fastify.log.info(`Sorting by: ${sort}`);
+        // Bước 2.2: Tạo whereClause - chuỗi điều kiện WHERE
+        // Nếu như mà có conditions(tưc là length > 0) thì thêm WHERE vào
+        // Nếu không có thì để trống
+        // Mà nếu có thì join nó sẽ tự động thêm AND giữa các điều kiện
+        // Ví dụ: nếu có title và author thì whereClause sẽ là "WHERE title ILIKE $1 AND author ILIKE $2"
+        // Bước 3: chuẩn bị 2 query
+        // Query 1: Đếm tổng số records để tính tổng số trang
+        const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+        // Ở đây có một vấn đề là nếu không có điều kiện lọc thì whereClause sẽ là ''
+        // và nếu có điều kiện lọc thì whereClause sẽ là "WHERE title ILIKE $1 AND author ILIKE $2"
+        // nên ở đây ta sẽ dùng một biến để lưu chuỗi whereClause
+        // và sau đó sẽ dùng biến này trong query để tránh việc phải thay đổi query mỗi khi có thêm điều kiện lọc
+        // Bước 3.1: Tạo query đếm tổng số bản ghi
+        // Cái này là để tính tổng số bản ghi trong database để tính tổng số trang
+        const countQuery = `SELECT COUNT(*) as total FROM books ${whereClause}`;
+        // 7/8/2025
+        // Query 2: Lấy dữ liệu với phân trang
+        // === GIẢI THÍCH CÁCH HOẠT ĐỘNG CỦA DYNAMIC PARAMETERS ===
+        //
+        // Bước 1: Kiểm tra có title hay không
+        // - Nếu có title: whereClause = "WHERE title ILIKE $1", baseParams = %`%${title.trim()}%`
+        // - Nếu không có title: whereClause = "", baseParams = []
+        //
+        // Bước 2: Xây dựng query với dynamic parameters position
+        // - baseParams.length + 1 = vị trí của LIMIT trong query
+        // - baseParams.length + 2 = vị trí của OFFSET trong query
+        // - Ví dụ: nếu baseParams.length = 1 (có title), thì LIMIT sẽ là $2 và OFFSET sẽ là $3
+        // - Nếu baseParams.length = 0 (không có title), thì LIMIT sẽ là $1 và OFFSET sẽ là $2
+        // - Điều này giúp tránh việc phải thay đổi query mỗi khi có thêm điều kiện lọc
+        //
+        // VÍ DỤ NÈ:
+        // - Nếu có title:
+        // - baseParams.length = 1
+        // - Vì thế vị trí của LIMIT sẽ là baseParams.length + 1 = 2
+        // - còn vị trí của OFFSET sẽ là baseParams.length + 2 = 3
+        // - Query sẽ là: "SELECT ... FROM books WHERE title ILIKE $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3"
+        // - còn dataParams, cũng sẽ có 3 phần tử để gán:
+        // - baseParams = ['%title%']
+        // - dataParams = ['%title%', pageSize, offset], nên nó sẽ duy trì được tính động của LIMIT và OFFSET
+        //
+        // - Nếu không có title:
+        // - baseParams.length = 0
+        // - Vì thế vị trí của LIMIT sẽ là baseParams.length + 1 = 1
+        // - còn vị trí của OFFSET sẽ là baseParams.length + 2 = 2
+        // - Query sẽ là: "SELECT ... FROM books ORDER BY created_at DESC LIMIT $1 OFFSET $2"
+        // - còn dataParams, cũng sẽ có 2 phần tử để gán:
+        // - baseParams = []
+        // - dataParams = [pageSize, offset], nên nó sẽ duy trì được tính động của LIMIT và OFFSET
+        // OK hết
+        //9/6/2025
+        // Ờm thì sẽ có thay đổi chút xíu, giờ tui phải thêm điều kiện lọc vào nữa
+        // Ở bản cập nhật này, tui sẽ thêm điều kiện where và sắp xếp dữ liệu(sort)
+        // ở trên tui có mô tả rồi nên tui sẽ không giải thích lại nữa
+        const dataQuery = `
+        SELECT
+        books.id, books.title, books.author, books.year, books.description, books.image_url, books.view_count,
+        books.like_count,
+        TO_CHAR(books.created_at, 'YYYY-MM-DD HH24:MI:SS') AS created_at,
+        TO_CHAR(books.updated_at, 'YYYY-MM-DD HH24:MI:SS') AS updated_at
+        FROM books
+        ${whereClause}
+        ${orderBy}
+        LIMIT $${baseParams.length + 1} OFFSET $${baseParams.length + 2}
+        `;
+
+        // Bước 4: Tạo parameters cho data query
+        // Spread operator (...) sao chép tất cả phần tử từ baseParams vào dataParams
+        // rồi thêm pageSize và offset vào cuối mảng
+        // kết quả là dataParams sẽ có đúng số lượng parameters cần thiết cho query
+        const dataParams = [...baseParams, pageSize, offset];
+
+        // Cái này là log để debug thông tin query thôi
+        fastify.log.info(`COUNT Query: ${countQuery}`);
+        fastify.log.info(`DATA Query: ${dataQuery.replace(/\$[0-9]+/g, '?')}`);
+        fastify.log.info(`COUNT Params: ${baseParams.join(', ')}`);
+        fastify.log.info(`DATA Params: ${dataParams.join(', ')}`);
+
+        // Bước 5: Thực hiện query đồng thời để tăng tốc
+        // Promise.all sẽ chạy song song 2 query
+        // Thời gian = max(query1_time, query2_time) thay vì là query1_time + query2_time
+        // mà max(query1_time, query2_time) tức là thời gian lâu nhất trong 2 query
+        const [countResult, dataResult] = await Promise.all([
+          fastify.db.query(countQuery, baseParams), // query đếm tổng số bản ghi
+          fastify.db.query(dataQuery, dataParams) // query lấy dữ liệu phân trang
+        ]);
+
+        // Bước 6: Xử lý kết quả từ database
+        const total = parseInt(countResult.rows[0]?.total || 0);
+        const books = dataResult?.rows || [];
+
+        // Tính tổng số trang: chia tổng records cho số items mỗi trang, làm tròn lên
+        // ví dụ: 155 books ÷ 20 per page = 7.75 -> Math.ceil(7.75) = 8 pages
+        const totalPages = Math.ceil(total / pageSize);
+
+        fastify.log.info(`Query completed: ${books.length} books found, total pages: ${totalPages}`);
+        // Bước 7: trả về kết quả với Format API sẵn
+        return {
+          success: true, // Đánh giấu request thành công cho FE dễ check
+          data: books, // Mảng sách của trang hiện tại
+          pagination: {
+            page: currentPage, // Trang hiện tại(đã validate ở bước 1)
+            limit: pageSize, // Số lượng item mỗi trang(đã validate ở bước 1)
+            total: total, // tổng số bản ghi trong database
+            totalPages: totalPages, // tổng số trang có thể có
+            returned: books.length, // số lượng sách trả về trong trang này
+            hasNext: currentPage < totalPages, // có trang tiếp theo không?
+            hasPrev: currentPage > 1 // có trang trước không?
+          }
+        }
+      } catch (error) {
+        fastify.log.error('Error in getAll:', error);
+        throw {
+          success: false,
+          message: 'Failed to retrieve books',
+          error: error.message || 'Unknown error'
+        };
+      }
     },
     /**
      * Retrieves a book by its ID, including details such as title, author, year, description, image_url,
@@ -185,9 +380,9 @@ export default function bookModel(fastify) {
      * * @returns {Promise<Object|null>} - A promise that resolves to the book object if found, or null if not found.
      * * @throws {Error} - Throws an error if the database query fails.
      * * @example
-     * * const book = await bookModel.getById(1, 123);
-     * * * This will return the book with ID 1, including whether it is liked by the user with ID 123.
-     * * * If the userId is not provided, it will return the book details without the like status.
+     * * 
+     * * 
+     * * 
      * */
     async getById(id, userId = null) {
       try {
