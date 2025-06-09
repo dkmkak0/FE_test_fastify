@@ -10,6 +10,15 @@ export default fastifyPlugin(async function (fastify) {
     password: process.env.DB_PASSWORD,
     port: parseInt(process.env.DB_PORT),
     ssl: { rejectUnauthorized: false },
+        // ✅ Connection pool optimization (cơ bản):
+    min: 2,                    // Luôn giữ ít nhất 2 connections
+    max: 10,                   // Tối đa 10 connections 
+    idleTimeoutMillis: 30000,  // Đóng connection không dùng sau 30s
+    connectionTimeoutMillis: 2000, // Timeout khi tạo connection mới
+    
+    // ✅ Performance settings:
+    keepAlive: true,           // Giữ connection alive
+    keepAliveInitialDelayMillis: 10000,
   });
 
   fastify.decorate('db', pool);

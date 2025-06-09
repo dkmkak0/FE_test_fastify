@@ -38,7 +38,7 @@ export default fp(async (fastify, opts) => {
             return JSON.parse(data); // Giả sử dữ liệu được lưu dưới dạng JSON
         },
         
-        async set(key, value, ttl = 3600) { // TTL mặc định là 3600 giây (1 giờ)
+        async set(key, value, ttl = 360) { // TTL mặc định là 3600 giây (1 giờ)
             await redisClient.set(key, JSON.stringify(value), {
                 EX: ttl // Thời gian sống của cache
             })
