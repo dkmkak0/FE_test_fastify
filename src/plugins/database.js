@@ -11,7 +11,7 @@ export default fastifyPlugin(async function (fastify) {
     port: parseInt(process.env.DB_PORT),
     ssl: { rejectUnauthorized: false },
         // ✅ Connection pool optimization (cơ bản):
-  min: 1,                    // Minimum 1 connection (reduce resource usage)
+    min: 1,                    // Minimum 1 connection (reduce resource usage)
     max: 3,                    // Max 3 connections (Azure B1ms limit)
     idleTimeoutMillis: 120000, // 2 minutes idle timeout (less aggressive)
     connectionTimeoutMillis: 15000, // 15s timeout for new connections

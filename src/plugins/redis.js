@@ -3,17 +3,18 @@ import { createClient } from 'redis';
 
 export default fp(async (fastify, opts) => {
     const config = {
-        url: process.env.REDIS_URL,
+        url: redisUrl,
         socket: {
             tls: true,
-            rejectUnauthorized: false, // Set to true in production with a valid certificate
-            connectTimeout: 10000,
-            commandTimeout: 5000,
-            lazyConnect: true 
+            rejectUnauthorized: false,
+            connectTimeout: 8000,    // ✅ Shorter timeout
+            commandTimeout: 3000,    // ✅ Faster command timeout
+            reconnectDelay: 2000,    // ✅ Auto-reconnect
+            lazyConnect: false       // ✅ Connect immediately
         },
         retry: {
-            times: 3,
-            delay: Math.min(50 * 2, 500)
+            times: 2,               // ✅ Less retry attempts
+            delay: 500
         }
     };
     // Tạo Redis client
@@ -29,21 +30,6 @@ export default fp(async (fastify, opts) => {
         console.log('Redis client is ready');
     });
     // Kết nối đến Redis server
-    await redisClient.connect().catch(err => {
-        console.error('Failed to connect to Redis:', err);
-    });
-    // đang bị lỗi sập server sau 1 khoảng thời gian không sử dụng
-    // thử cái này trước thôi
-     try {
-        await Promise.race([
-            redisClient.connect(),
-            new Promise((_, reject) => 
-                setTimeout(() => reject(new Error('Redis initial connection timeout')), 10000)
-            )
-        ]);
-    } catch (err) {
-        fastify.log.warn('Redis initial connection failed, running with fallback cache');
-    }
     // Đăng ký Redis client vào Fastify
     fastify.decorate('redis', redisClient);
 
