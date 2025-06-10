@@ -28,7 +28,7 @@ export default function bookModel(fastify) {
         fastify.log.info(`Titles loaded from database: ${result.rows.length} rows`);
         const titles = result?.rows?.map(row => row.title) || [];
         // lưu vào cache
-        await fastify.cache.set('books:titles', titles, 168 * 60 * 60); // cache for 1 week
+        await fastify.cache.set('books:titles', titles, 24 * 60 * 60); // cache for 1 week
         fastify.log.info(`Titles loaded and cached: ${titles.length} items`);
         return titles;
       } catch (error) {

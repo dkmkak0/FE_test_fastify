@@ -22,8 +22,6 @@ export default fp(async (fastify, opts) => {
         socket: {
             tls: true,
             rejectUnauthorized: false,
-            connectTimeout: 8000,
-            commandTimeout: 3000,
         }
     });
     // xử lý sự kiện kết nối

@@ -52,12 +52,6 @@ fastify.decorate('bookModel', bookModel(fastify));
 fastify.decorate('userModel', userModel);
 fastify.decorate('viewHistoryModel', viewHistoryModel);
 
-//nạp dữ liệu gợi ý vào bộ nhớ
-fastify.after(async () => {
-  await fastify.bookModel.getTitles();
-  fastify.log.info('đã load xong dữ liệu gợi ý');
-});
-
 // Đăng ký routes
 fastify.register(bookRoutes, { prefix: '/api' });
 fastify.register(userRoutes, { prefix: '/api' });
@@ -89,6 +83,15 @@ const start = async () => {
       host: '0.0.0.0' 
     });
     fastify.log.info(`Server đang chạy tại cổng ${port}`);
+    setImmediate(async () => {
+      try {
+        fastify.log.info('Starting background cache warming...');
+        const titles = await fastify.bookModel.getTitles();
+        fastify.log.info(`Background cache warming completed: ${titles.length} dữ liệu gợi ý`);
+      } catch (error) {
+        fastify.log.warn('Background cache warming failed:', error.message);
+      }
+    });
   } catch (err) {
     fastify.log.error(err);
     process.exit(1);
