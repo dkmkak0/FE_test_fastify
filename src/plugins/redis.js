@@ -3,10 +3,12 @@ import { createClient } from 'redis';
 
 export default fp(async (fastify, opts) => {
     const config = {
-        url: process.env.REDIS_URL || 'redis://localhost:6379',
+        url: process.env.REDIS_URL,
         socket: {
             tls: true,
-            rejectUnauthorized: false // Set to true in production with a valid certificate
+            rejectUnauthorized: false, // Set to true in production with a valid certificate
+            connectTimeout: 10000,
+            commandTimeout: 5000
         }
     };
     // Tạo Redis client
