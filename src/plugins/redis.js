@@ -3,22 +3,29 @@ import { createClient } from 'redis';
 
 export default fp(async (fastify, opts) => {
     const redisUrl = process.env.REDIS_URL;
-    const config = {
+    if (!redisUrl) {
+        console.log('No Redis URL - using no-op cache');
+        fastify.decorate('cache', {
+            async get(key) { return null; },
+            async set(key, value, ttl = 3600) { return true; },
+            async del(key) { return true; },
+            async delByPrefix(prefix) { return true; },
+            async clear() { return true; },
+            async exists(key) { return false; }
+        });
+        return;
+    };
+
+    // ✅ Tạo Redis client đơn giản:
+    const redisClient = createClient({
         url: redisUrl,
         socket: {
             tls: true,
             rejectUnauthorized: false,
-                    connectTimeout: 8000,    // ✅ Connection timeout
-            commandTimeout: 3000,    // ✅ Command timeout
-            reconnectDelay: 2000,    // ✅ Auto-reconnect delay
-        },
-        retry: {
-            times: 2,               // ✅ Retry attempts
-            delay: 1000
+            connectTimeout: 8000,
+            commandTimeout: 3000,
         }
-    };
-    // Tạo Redis client
-    const redisClient = createClient(config);
+    });
     // xử lý sự kiện kết nối
     redisClient.on('error', (err) => {
         console.error('Redis Client Error', err);
@@ -34,26 +41,22 @@ export default fp(async (fastify, opts) => {
         isConnected = false;
     });
 
-    redisClient.on('reconnecting', () => {
-        fastify.log.info('Redis reconnecting...');
-        isConnected = false;
-    });
     try {
-        connectionAttempted = true;
-        await Promise.race([
-            redisClient.connect(),
-            new Promise((_, reject) => 
-                setTimeout(() => reject(new Error('Redis connection timeout')), 10000)
-            )
-        ]);
-        fastify.log.info('Redis initial connection successful');
+        await redisClient.connect();
+        console.log('Redis ready to use');
     } catch (err) {
-        fastify.log.warn('Redis initial connection failed:', err.message);
-        // ✅ Continue with no-op cache instead of crashing
-        fastify.decorate('cache', createNoOpCache(fastify));
+        console.warn('Redis connection failed:', err.message);
+        // ✅ Fallback to no-op cache:
+        fastify.decorate('cache', {
+            async get(key) { return null; },
+            async set(key, value, ttl = 3600) { return true; },
+            async del(key) { return true; },
+            async delByPrefix(prefix) { return true; },
+            async clear() { return true; },
+            async exists(key) { return false; }
+        });
         return;
     }
-
     // Kết nối đến Redis server
     // Đăng ký Redis client vào Fastify
     fastify.decorate('redis', redisClient);
