@@ -7,15 +7,8 @@ export default fp(async (fastify, opts) => {
         socket: {
             tls: true,
             rejectUnauthorized: false,
-            connectTimeout: 8000,    // ✅ Shorter timeout
-            commandTimeout: 3000,    // ✅ Faster command timeout
-            reconnectDelay: 2000,    // ✅ Auto-reconnect
-            lazyConnect: false       // ✅ Connect immediately
         },
-        retry: {
-            times: 2,               // ✅ Less retry attempts
-            delay: 500
-        }
+
     };
     // Tạo Redis client
     const redisClient = createClient(config);
