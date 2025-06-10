@@ -29,6 +29,31 @@ export default fp(async (fastify, opts) => {
     redisClient.on('ready', () => {
         console.log('Redis client is ready');
     });
+    redisClient.on('end', () => {
+        fastify.log.warn('Redis connection ended');
+        isConnected = false;
+    });
+
+    redisClient.on('reconnecting', () => {
+        fastify.log.info('Redis reconnecting...');
+        isConnected = false;
+    });
+    try {
+        connectionAttempted = true;
+        await Promise.race([
+            redisClient.connect(),
+            new Promise((_, reject) => 
+                setTimeout(() => reject(new Error('Redis connection timeout')), 10000)
+            )
+        ]);
+        fastify.log.info('Redis initial connection successful');
+    } catch (err) {
+        fastify.log.warn('Redis initial connection failed:', err.message);
+        // ✅ Continue with no-op cache instead of crashing
+        fastify.decorate('cache', createNoOpCache(fastify));
+        return;
+    }
+
     // Kết nối đến Redis server
     // Đăng ký Redis client vào Fastify
     fastify.decorate('redis', redisClient);
