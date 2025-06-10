@@ -2,6 +2,7 @@ import fp from 'fastify-plugin';
 import { createClient } from 'redis';
 
 export default fp(async (fastify, opts) => {
+    const redisUrl = process.env.REDIS_URL;
     const config = {
         url: redisUrl,
         socket: {
