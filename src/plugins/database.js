@@ -10,8 +10,6 @@ export default fastifyPlugin(async function (fastify) {
     password: process.env.DB_PASSWORD,
     port: parseInt(process.env.DB_PORT),
     ssl: { rejectUnauthorized: false },
-    max: 10, // Giới hạn kết nối tối đa
-    min: 1
   });
   fastify.decorate('db', pool);
 });
