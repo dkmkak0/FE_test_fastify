@@ -73,11 +73,33 @@ fastify.setErrorHandler((error, request, reply) => {
     error: error.message || 'Lỗi server' 
   });
 });
-
+fastify.log.info('Environment check:', {
+  NODE_ENV: process.env.NODE_ENV,
+  PORT: process.env.PORT,
+  DB_HOST: process.env.DB_HOST ? 'Set' : 'Not set',
+  DB_NAME: process.env.DB_NAME ? 'Set' : 'Not set',
+  REDIS_URL: process.env.REDIS_URL ? 'Set' : 'Not set',
+  REDIS_CONNECTION_STRING: process.env.REDIS_CONNECTION_STRING ? 'Set' : 'Not set'
+});
+process.nextTick(() => {
+  if (!process.env.REDIS_URL && !process.env.REDIS_CONNECTION_STRING) {
+    console.error('CRITICAL: Redis env vars missing after container restart');
+    // Log all env vars for debugging
+    console.log('Available env vars:', Object.keys(process.env).filter(k => k.includes('REDIS')));
+  }
+});
 // Khởi động server
 const start = async () => {
   try {
     const port = process.env.PORT || 8080;
+    fastify.get('/health', async () => {
+      return { 
+        status: 'healthy',
+        timestamp: new Date().toISOString(),
+        uptime: Math.floor(process.uptime()),
+        memory: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + 'MB'
+      };
+    });
     await fastify.listen({ 
       port: port, 
       host: '0.0.0.0' 
