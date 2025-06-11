@@ -23,4 +23,12 @@ export default fastifyPlugin(async function (fastify) {
     keepAliveInitialDelayMillis: 10000, // 10s initial delay
   });
   fastify.decorate('db', pool);
+  fastify.addHook('onClose', async () => {
+    try {
+      await pool.end();
+      fastify.log.info('Database pool closed');
+    } catch (error) {
+      fastify.log.error('Error closing database pool:', error.message);
+    }
+  });
 });
