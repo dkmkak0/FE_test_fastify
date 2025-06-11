@@ -68,33 +68,33 @@ export default fp(async (fastify, opts) => {
         },
         
         async set(key, value, ttl = 360) { // TTL mặc định là 3600 giây (1 giờ)
-            await redisClient.set(key, JSON.stringify(value), {
+            await fastify.redis.set(key, JSON.stringify(value), {
                 EX: ttl // Thời gian sống của cache
             })
         },
 
         async del(key) {
-            await redisClient.del(key);
+            await fastify.redis.del(key);
         },
 
         async delByPrefix(prefix) {
             //lấy tất cả keys theo prefix
-            const keys = await redisClient.keys(`${prefix}*`);
+            const keys = await fastify.redis.keys(`${prefix}*`);
             if(keys.length > 0) {
-                await redisClient.del(keys);
+                await fastify.redis.del(keys);
             }
         },
 
         async clear() {
             // Xóa toàn bộ cache
-            const keys = await redisClient.keys('*');
+            const keys = await fastify.redis.keys('*');
             if(keys.length > 0) {
-                await redisClient.del(keys);
+                await fastify.redis.del(keys);
             }
         },
 
         async exists(key) {
-            return await redisClient.exists(key) === 1; // Trả về true nếu key tồn tại
+            return await fastify.redis.exists(key) === 1; // Trả về true nếu key tồn tại
         },
     });
     // Đóng kết nối Redis khi Fastify đóng
