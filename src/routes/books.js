@@ -479,7 +479,7 @@ export default async (fastify) => {
         type: 'object',
         required: ['query'],
         properties: {
-          query: { type: 'string', minLength: 1 },
+          query: { type: 'string', default: ''},
           limit: { type: 'integer', minimum: 1, maximum: 20, default: 10 },
         },
       },

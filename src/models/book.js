@@ -2,153 +2,6 @@
 export default function bookModel(fastify) {
   return {
     /**
-     * Retrieves all unique book titles from the database.
-     * If the titles are cached, it returns them from the cache.
-     * If not cached, it queries the database and caches the results for future use.
-     * @returns {Promise<Array>} - A promise that resolves to an array of unique book titles.
-     * @throws {Error} - Throws an error if there is an issue with the cache or database.
-     * @example
-     * const titles = await bookModel.getTitles();
-     * This will return an array of unique book titles from the database or cache.
-     */
-    async getTitles() {
-      try {
-        const cachedTitles = await fastify.cache.get('books:titles');
-        if (cachedTitles) {
-          fastify.log.info(`Loaded titles from cache: ${cachedTitles.length} items`);
-          return cachedTitles;
-        }
-        // nếu chưa có cache thì lấy từ database
-        fastify.log.info('Titles not in cache, loading titles from database');
-        const result = await fastify.db.query(`
-      SELECT DISTINCT ON (title) title
-      FROM books
-      ORDER BY title, created_at DESC
-    `);
-        fastify.log.info(`Titles loaded from database: ${result.rows.length} rows`);
-        const titles = result?.rows?.map(row => row.title) || [];
-        // lưu vào cache
-        await fastify.cache.set('books:titles', titles, 24 * 60 * 60); // cache for 1 week
-        fastify.log.info(`Titles loaded and cached: ${titles.length} items`);
-        return titles;
-      } catch (error) {
-        fastify.log.error('Error in getTitles:', error);
-        return [];
-      }
-    },
-
-    /**   * Adds a new book title to the cache.
-     * If the title already exists in the cache, it does nothing.
-     * * @param {Object} fastify - The Fastify instance.
-     *  * @param {string} title - The book title to add to the cache.
-     *  * @returns {Promise<void>} - A promise that resolves when the title is added to the cache.
-     * * @throws {Error} - Throws an error if there is an issue with the cache or database.
-     * * @example
-     * * await bookModel.addTitleToCache(fastify, 'New Book Title');
-     * * * This will add 'New Book Title' to the cache if it does not already exist.
-     * * * If the title already exists, it will log that the title already exists in cache.
-     * */
-    async addTitleToCache(title) {
-      try {
-        if (!title) return;
-
-        // láy titles hiện tại
-        const titles = await this.getTitles();
-
-        // nếu titles đã tồn tại thì không cần thêm
-        if (titles.includes(title)) {
-          fastify.log.info(`Title "${title}" already exists in cache.`);
-          return;
-        }
-        //thêm title mới vào đầu mảng
-        titles.unshift(title);
-
-        // cập nhật cache với mảng titles mới
-        await fastify.cache.set('books:titles', titles, 168 * 60 * 60); // cache for 1 week
-        fastify.log.info(`Title "${title}" added to cache.`);
-      } catch (error) {
-        fastify.log.error('Error in addTitleToCache:', error);
-        throw error;
-      }
-    },
-    /**   * Removes a book title from the cache.
-     * If the title does not exist in the cache, it does nothing.
-     * * @param {Object} fastify - The Fastify instance.
-     * * @param {string} title - The book title to remove from the cache.
-     * * @returns {Promise<void>} - A promise that resolves when the title is removed from the cache.
-     * * @throws {Error} - Throws an error if there is an issue with the cache or database.
-     * * @example
-     * * await bookModel.removeTitleFromCache(fastify, 'Old Book Title');
-     * * * This will remove 'Old Book Title' from the cache if it exists.
-     * * * If the title does not exist, it will log that the title was not found in cache.
-     * */
-    async removeTitleFromCache(title) {
-      try {
-        if (!title) return;
-
-        // lấy titles hiện tại
-        const titles = await this.getTitles();
-
-        //lọc title cần xoá
-        const updatedTitles = titles.filter(t => t !== title);
-
-        // nếu không có title nào được xoá thì không cần cập nhật cache
-        if (updatedTitles.length === titles.length) {
-          fastify.log.info(`Title "${title}" not found in cache.`);
-          return;
-        }
-        //cập nhật cache mới
-        await fastify.cache.set('books:titles', updatedTitles, 168 * 60 * 60); // cache for 1 week
-        fastify.log.info(`Title "${title}" removed from cache.`);
-      } catch (error) {
-        fastify.log.error('Error in removeTitleFromCache:', error);
-        throw error;
-      }
-    },
-    /**   * Updates the titles cache by replacing an old title with a new title.
-     * If the old title does not exist, it adds the new title to the cache.
-     * * @param {Object} fastify - The Fastify instance.
-     * * @param {string} oldTitle - The old book title to be replaced.
-     * * @param {string} newTitle - The new book title to replace the old title with.
-     * * @returns {Promise<void>} - A promise that resolves when the titles cache is updated.
-     * * @throws {Error} - Throws an error if there is an issue with the cache or database.
-     * * @example
-     * * await bookModel.updateTitlesCache(fastify, 'Old Book Title', 'New Book Title');
-     * * * This will replace 'Old Book Title' with 'New Book Title' in the cache.
-     * * * If 'Old Book Title' does not exist, it will add 'New Book Title' to the cache.
-     * */
-    async updateTitlesCache(oldTitle, newTitle) {
-      try {
-        if (!oldTitle || !newTitle || oldTitle === newTitle) return;
-
-        // lấy titles hiện tại
-        const titles = await this.getTitles();
-
-        //tìm vị trí của title cũ
-        const index = titles.indexOf(oldTitle);
-
-        // nếu không tìm thấy title cũ thì không cần cập nhật cache
-        if (index === -1) {
-          await this.addTitleToCache(newTitle);
-          return;
-        }
-
-        if (titles.includes(newTitle)) {
-          // nếu title mới đã tồn tại thì xoá title cũ
-          titles.splice(index, 1);
-        } else {
-          // thay thế title cũ bằng title mới
-          titles[index] = newTitle;
-        }
-        // cập nhật cache với mảng titles mới
-        await fastify.cache.set('books:titles', titles, 168 * 60 * 60); // cache for 1 week
-        fastify.log.info(`Title updated in cache: "${oldTitle}" -> "${newTitle}"`);
-      } catch (error) {
-        fastify.log.error('Error in updateTitlesCache:', error);
-        throw error;
-      }
-    },
-    /**
      * Retrieves all books from the database, optionally filtered by title.
      * phân trang giúp chia nhỏ dữ liệu thành các trang nhỏ để tăng hiệu suất và trải nghiệm người dùng.
      *
@@ -422,7 +275,6 @@ export default function bookModel(fastify) {
 
         // nếu tạo thành công thì thêm title vào cache
         if (newBook) {
-          await this.addTitleToCache(newBook.title);
           fastify.log.info(`New book created and title "${newBook.title}" added to cache.`);
         }
         return newBook;
@@ -452,8 +304,7 @@ export default function bookModel(fastify) {
         const updatedBook = result?.rows[0] || null;
         //nếu cập nhật thành công thì cập nhật cache
         if (updatedBook && oldBook.title !== updatedBook.title) {
-          await this.updateTitlesCache(oldBook.title, updatedBook.title);
-          fastify.log.info(`Book with ID ${id} updated and title "${updatedBook.title}" cached.`);
+          fastify.log.info(`Book with ID ${id} updated and title "${updatedBook.title}"`);
         }
         return updatedBook;
       } catch (error) {
@@ -477,8 +328,7 @@ export default function bookModel(fastify) {
         const result = await fastify.db.query('DELETE FROM books WHERE id = $1 RETURNING *', [id]);
         const success = result?.rowCount > 0;
         if (success) {
-          await this.removeTitleFromCache(book.title);
-          fastify.log.info(`Book with ID ${id} deleted and title "${book.title}" removed from cache.`);
+          fastify.log.info(`Book with ID ${id} deleted and title "${book.title}" removed`);
         }
         return success;
       } catch (error) {
@@ -519,16 +369,36 @@ export default function bookModel(fastify) {
 
         fastify.log.info(`Suggestions not in cache, loading from database for query: ${searchQuery}`);
 
-        //truy vấn title từ cache
-        const titles = await this.getTitles();
-
-        // lọc title
-        const suggestions = titles
-          .filter(title => title.toLowerCase().includes(searchQuery))
-          .slice(0, limit);
-
+        //cái này query database với ranking
+        const startTime = Date.now();
+        const result = await fastify.db.query(`
+        SELECT DISTINCT title, 
+              CASE
+                WHEN lower(title) LIKE $1 THEN 1
+                WHEN lower(title) LIKE $2 THEN 2
+                WHEN lower(title) LIKE $3 THEN 3
+                ESLE 4
+              END AS rank
+        FROM books
+        WHERE lower(title) LIKE lower($3)
+        ORDER BY priority ASC, title_length ASC, title ASC
+        LIMIT $4
+        `, [searchQuery, `%${searchQuery}%`, `%${searchQuery}%`, limit]
+        );
+        const queryTime = Date.now() - startTime;
+        const suggestions = result?.rows?.map(row => row.title) || [];
         //lưu cache lại kết quả tìm kiếm để giảm truy vấn
-        await fastify.cache.set(cachedKey, suggestions, 300);
+        let tt;
+        let ttl;
+    if (searchQuery.length <= 2) {
+      ttl = 1800; // Short queries cache 30 minutes (popular)
+    } else if (suggestions.length === 0) {
+      ttl = 300;  // No results cache 5 minutes only
+    } else {
+      ttl = 600;  // Normal queries cache 10 minutes
+    }
+    fastify.log.info(`DB suggestions: "${searchQuery}" -> ${suggestions.length} results in ${queryTime}ms`);
+        await fastify.cache.set(cachedKey, suggestions, ttl);
         fastify.log.info(`Suggestions loaded and cached for query: ${searchQuery}, found ${suggestions.length} items`);
         return suggestions;
       } catch (error) {
