@@ -40,7 +40,7 @@ export default async (fastify) => {
               page: { type: 'integer'},
               limit: {type: 'integer'},
               total: {type: 'integer'},
-              total_pages: {type: 'integer'},
+              totalPages: {type: 'integer'},
               returned: {type: 'integer'},
               hasNext: {type: 'boolean'},
               hasPrevious: {type: 'boolean'},
