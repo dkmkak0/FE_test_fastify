@@ -1,63 +1,61 @@
 import fp from 'fastify-plugin';
-import { createClient } from 'redis';
-
+// import { createClient } from 'redis';
+import Redis from 'ioredis';
 export default fp(async (fastify, opts) => {
-    const redisUrl = process.env.REDIS_URL;
-    if (!redisUrl) {
-        console.log('No Redis URL - using no-op cache');
-        fastify.decorate('cache', {
-            async get(key) { return null; },
-            async set(key, value, ttl = 3600) { return true; },
-            async del(key) { return true; },
-            async delByPrefix(prefix) { return true; },
-            async clear() { return true; },
-            async exists(key) { return false; }
-        });
-        return;
-    };
-
-    // ✅ Tạo Redis client đơn giản:
-    const redisClient = createClient({
-        url: redisUrl,
-        socket: {
-            tls: true,
-            rejectUnauthorized: false,
-        }
-    });
+    const redis = new Redis(process.env.REDIS_URL, {
+    // ✅ Azure optimized settings
+    connectTimeout: 10000,       // 10s connect timeout
+    lazyConnect: true,           // Connect on first command
+    maxRetriesPerRequest: 3,     // Retry failed requests
+    retryDelayOnFailover: 100,   // Retry delay
+    
+    // ✅ Keep-alive settings for Azure
+    keepAlive: 30000,            // 30s keep-alive
+    family: 4,                   // Force IPv4
+    
+    // ✅ Reconnection strategy
+    retryDelayOnReconnect: function (times) {
+      const delay = Math.min(times * 50, 2000);
+      return delay;
+    },
+    
+    // ✅ Connection recovery
+    maxRetriesPerRequest: null,  // Disable request retry limit
+    reconnectOnError: function (err) {
+      const targetError = 'READONLY';
+      return err.message.includes(targetError);
+    }
+  });
     // xử lý sự kiện kết nối
-    redisClient.on('error', (err) => {
+    redis.on('error', (err) => {
         console.error('Redis Client Error', err);
     });
-    redisClient.on('connect', () => {
+    redis.on('connect', () => {
         console.log('Redis client connected successfully');
     });
-    redisClient.on('ready', () => {
+    redis.on('ready', () => {
         console.log('Redis client is ready');
     });
-    redisClient.on('end', () => {
+    redis.on('end', () => {
         fastify.log.warn('Redis connection ended');
         isConnected = false;
     });
-
+    redis.on('reconnecting', () => {
+    fastify.log.info('Redis client reconnecting');
+  });
+  // ✅ Periodic ping to keep connection alive
+  const keepAliveInterval = setInterval(async () => {
     try {
-        await redisClient.connect();
-        console.log('Redis ready to use');
-    } catch (err) {
-        console.warn('Redis connection failed:', err.message);
-        // ✅ Fallback to no-op cache:
-        fastify.decorate('cache', {
-            async get(key) { return null; },
-            async set(key, value, ttl = 3600) { return true; },
-            async del(key) { return true; },
-            async delByPrefix(prefix) { return true; },
-            async clear() { return true; },
-            async exists(key) { return false; }
-        });
-        return;
+      await redis.ping();
+      fastify.log.debug('Redis ping successful');
+    } catch (error) {
+      fastify.log.error('Redis ping failed:', error.message);
     }
+  }, 4 * 60 * 1000); // Every 4 minutes
+   
     // Kết nối đến Redis server
     // Đăng ký Redis client vào Fastify
-    fastify.decorate('redis', redisClient);
+    fastify.decorate('redis', redis);
 
     //tạo helper methods cho cache
     fastify.decorate('cache', {
@@ -102,8 +100,10 @@ export default fp(async (fastify, opts) => {
     // Đóng kết nối Redis khi Fastify đóng
     fastify.addHook('onClose', async (fastifyInstance, done) => {
         try {
-            await redisClient.quit();
-            console.log('Redis client disconnected');
+            clearInterval(keepAliveInterval);
+            await redis.quit();
+        redis.disconnect();
+
         } catch (err) {
             console.error('Error disconnecting Redis client:', err);
         }

@@ -10,21 +10,53 @@ export default fastifyPlugin(async function (fastify) {
     password: process.env.DB_PASSWORD,
     port: parseInt(process.env.DB_PORT),
     ssl: { rejectUnauthorized: false },
-      // ✅ CRITICAL: Fix connection pool config
-    max: 3,                      // Max 3 connections (was unlimited)
-    min: 1,                      // Min 1 connection
-    idleTimeoutMillis: 10000,    // 10s idle timeout (force cleanup)
-    connectionTimeoutMillis: 3000, // 3s connection timeout
-    acquireTimeoutMillis: 5000,    // 5s acquire timeout
     
-    // ✅ CRITICAL: Enable automatic cleanup
-    allowExitOnIdle: true,       // Allow process exit when idle
+    // ✅ OPTIMIZED: Azure Web App specific settings
+    max: 5,                      // Increase max connections slightly
+    min: 2,                      // Keep minimum connections alive
+    idleTimeoutMillis: 30000,    // 30s idle timeout (longer for Azure)
+    connectionTimeoutMillis: 10000, // 10s connection timeout
+    acquireTimeoutMillis: 10000,    // 10s acquire timeout
+    
+    // ✅ CRITICAL: Connection health checks
+    allowExitOnIdle: false,      // Don't allow exit on idle for Azure
     keepAlive: true,             // Keep connections alive
-    keepAliveInitialDelayMillis: 10000, // 10s initial delay
+    keepAliveInitialDelayMillis: 0, // Start keepalive immediately
+    
+    // ✅ NEW: Add query timeout
+    statement_timeout: 30000,    // 30s query timeout
+    query_timeout: 30000,        // 30s query timeout
   });
+
+  // ✅ Add connection health check
+  pool.on('connect', (client) => {
+    fastify.log.info('New database connection established');
+  });
+
+  pool.on('error', (err) => {
+    fastify.log.error('Database pool error:', err.message);
+  });
+
+  // ✅ Add periodic connection test
+  const testConnection = async () => {
+    try {
+      const client = await pool.connect();
+      await client.query('SELECT 1');
+      client.release();
+      fastify.log.debug('Database connection test successful');
+    } catch (error) {
+      fastify.log.error('Database connection test failed:', error.message);
+    }
+  };
+
+  // Test connection every 4 minutes to prevent timeout
+  const connectionTestInterval = setInterval(testConnection, 4 * 60 * 1000);
+
   fastify.decorate('db', pool);
+  
   fastify.addHook('onClose', async () => {
     try {
+      clearInterval(connectionTestInterval);
       await pool.end();
       fastify.log.info('Database pool closed');
     } catch (error) {
