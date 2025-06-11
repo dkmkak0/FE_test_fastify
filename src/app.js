@@ -15,7 +15,17 @@ import viewHistoryModel from './models/view_history.js';
 import redisPlugin from './plugins/redis.js';
 
 const fastify = Fastify({ 
-  logger: true,
+  logger: {
+    level: 'info',
+    transport: {
+      target: 'pino-pretty',
+      options: {
+        colorize: true,
+        translateTime: 'HH:MM:ss Z',
+        ignore: 'pid,hostname'
+      }
+    }
+  },
   ajv: {
     customOptions: {
       removeAdditional: 'all',
@@ -23,6 +33,11 @@ const fastify = Fastify({
       useDefaults: true,
     },
   },
+  // ✅ CRITICAL: Add request timeout protection:
+  requestTimeout: 20000,        // 20s request timeout
+  keepAliveTimeout: 61000,      // 61s keep-alive
+  connectionTimeout: 0,         // No connection timeout
+  bodyLimit: 33554432,         // 32MB body limit
 });
 
 // Đăng ký plugins
